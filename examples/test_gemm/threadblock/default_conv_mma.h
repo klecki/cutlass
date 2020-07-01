@@ -128,6 +128,9 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
       ElementB, LayoutB, ElementAccumulator, layout::RowMajor,
       arch::OpClassSimt, 2, Operator>;
 
+  static int const kThreads = MmaCore::kThreads;
+  static int const kElementsPerAccess = MmaCore::kElementsPerAccess;
+
   // Define iterators over tiles from the A operand
   using IteratorA =
       cutlass::transform::threadblock::PredicatedTileIterator<
@@ -140,8 +143,31 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
           cutlass::MatrixShape<MmaCore::Shape::kK, MmaCore::Shape::kN>,
           ElementB, LayoutB, 0, typename MmaCore::IteratorThreadMapB, kAlignmentB>;
 
+  using TileShapeB = cutlass::layout::PitchLinearShape<MmaCore::Shape::kK, 1>; // we only load one row of window - hmm, it's bad that it's the other way round
+  using TileLayoutB = cutlass::layout::PitchLinear;
+
+  // in  DefaultConvMmaCore
+    /// Policy of iterator B
+  using IteratorThreadMapB = transform::PitchLinearStripminedThreadMap<
+    TileShapeB,
+    kThreads,
+    kElementsPerAccess
+  >;
+
+
+  // ThreadMaps define how threads are mapped to a given tile. The PitchLinearStripminedThreadMap
+  // stripmines a pitch-linear tile among a given number of threads, first along the contiguous
+  // dimension then along the strided dimension.
+  // using ThreadMap = cutlass::transform::PitchLinearStripminedThreadMap<TileLayoutB, kThreads>;
+
+  // Define the PredicateTileIterator, using TileShape, Element, Layout, and ThreadMap types
+  // using IteratorB = cutlass::transform::threadblock::PredicatedTileIterator<
+  //     TileShapeB, ElementB, TileLayoutB, 0, IteratorThreadMapB>; // advance rank TODO???
+
   // Define the threadblock-scoped pipelined matrix multiply
-  using ThreadblockMma = cutlass::gemm::threadblock::MmaPipelined<
+
+  // We pass here all the iterators and there is the actual impl of load GMEM->SMEM happening
+  using ThreadblockMma = cutlass::gemm::threadblock::ConvMmaPipelined<
       typename MmaCore::Shape, IteratorA, typename MmaCore::SmemIteratorA,
       IteratorB, typename MmaCore::SmemIteratorB, ElementAccumulator,
       layout::RowMajor, typename MmaCore::MmaPolicy>;
@@ -199,7 +225,7 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 //           ElementB, LayoutB, 0, typename MmaCore::IteratorThreadMapB, kAlignmentB>;
 
 //   // Define the threadblock-scoped pipelined matrix multiply
-//   using ThreadblockMma = cutlass::gemm::threadblock::MmaPipelined<
+//   using ThreadblockMma = cutlass::gemm::threadblock::ConvMmaPipelined<
 //       typename MmaCore::Shape, IteratorA, typename MmaCore::SmemIteratorA,
 //       IteratorB, typename MmaCore::SmemIteratorB, ElementAccumulator,
 //       layout::RowMajor, typename MmaCore::MmaPolicy>;
@@ -250,7 +276,7 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 //           float, LayoutB, 0, typename MmaCore::IteratorThreadMapB, kAlignmentB>;
 
 //   // Define the threadblock-scoped pipelined matrix multiply
-//   using ThreadblockMma = cutlass::gemm::threadblock::MmaPipelined<
+//   using ThreadblockMma = cutlass::gemm::threadblock::ConvMmaPipelined<
 //       typename MmaCore::Shape, IteratorA, typename MmaCore::SmemIteratorA,
 //       IteratorB, typename MmaCore::SmemIteratorB, float,
 //       layout::RowMajor, typename MmaCore::MmaPolicy>;
@@ -317,7 +343,7 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 //       LayoutB, 0, typename MmaCore::IteratorThreadMapB>;
 
 //   // Define the threadblock-scoped pipelined matrix multiply
-//   using ThreadblockMma = cutlass::gemm::threadblock::MmaPipelined<
+//   using ThreadblockMma = cutlass::gemm::threadblock::ConvMmaPipelined<
 //       typename MmaCore::Shape, IteratorA, typename MmaCore::SmemIteratorA,
 //       IteratorB, typename MmaCore::SmemIteratorB, ElementAccumulator,
 //       layout::ColumnMajorInterleaved<InterleavedK>,
@@ -587,7 +613,7 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 //           ElementB, LayoutB, 0, typename MmaCore::IteratorThreadMapB, transposeB>;
 
 //   // Define the threadblock-scoped pipelined matrix multiply
-//   using ThreadblockMma = cutlass::gemm::threadblock::MmaPipelined<
+//   using ThreadblockMma = cutlass::gemm::threadblock::ConvMmaPipelined<
 //       typename MmaCore::Shape, IteratorA, typename MmaCore::SmemIteratorA,
 //       IteratorB, typename MmaCore::SmemIteratorB, ElementAccumulator,
 //       layout::RowMajor, typename MmaCore::MmaPolicy>;
@@ -647,7 +673,7 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 //           ElementB, LayoutB, 0, typename MmaCore::IteratorThreadMapB, kAlignmentB>;
 
 //   // Define the threadblock-scoped pipelined matrix multiply
-//   using ThreadblockMma = cutlass::gemm::threadblock::MmaPipelined<
+//   using ThreadblockMma = cutlass::gemm::threadblock::ConvMmaPipelined<
 //       typename MmaCore::Shape, IteratorA, typename MmaCore::SmemIteratorA,
 //       IteratorB, typename MmaCore::SmemIteratorB, ElementAccumulator,
 //       LayoutC, typename MmaCore::MmaPolicy>;

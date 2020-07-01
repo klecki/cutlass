@@ -38,7 +38,8 @@
 #include "cutlass/matrix_shape.h"
 
 #include "cutlass/gemm/warp/mma.h"
-#include "cutlass/gemm/threadblock/mma_pipelined.h"
+// #include "cutlass/gemm/threadblock/mma_pipelined.h"
+#include "threadblock/conv_mma_pipelined.h"
 #include "cutlass/gemm/threadblock/mma_singlestage.h"
 #include "cutlass/arch/cache_operation.h"
 

@@ -39,7 +39,7 @@
 
 // #include "cutlass/gemm/kernel/default_gemm.h"
 #include "kernel/default_conv.h"
-#include "cutlass/gemm/device/default_gemm_configuration.h"
+#include "device/default_conv_configuration.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -178,19 +178,19 @@ template <
     /// Tag indicating architecture to tune for
     typename ArchTag_ = arch::Sm70,
     /// Threadblock-level tile size (concept: GemmShape)
-    typename ThreadblockShape_ = typename DefaultGemmConfiguration<
+    typename ThreadblockShape_ = typename DefaultConvConfiguration<
         OperatorClass_, ArchTag_, ElementA_, ElementB_, ElementC_,
         ElementAccumulator_>::ThreadblockShape,
     /// Warp-level tile size (concept: GemmShape)
-    typename WarpShape_ = typename DefaultGemmConfiguration<
+    typename WarpShape_ = typename DefaultConvConfiguration<
         OperatorClass_, ArchTag_, ElementA_, ElementB_, ElementC_,
         ElementAccumulator_>::WarpShape,
     /// Instruction-level tile size (concept: GemmShape)
-    typename InstructionShape_ = typename DefaultGemmConfiguration<
+    typename InstructionShape_ = typename DefaultConvConfiguration<
         OperatorClass_, ArchTag_, ElementA_, ElementB_, ElementC_,
         ElementAccumulator_>::InstructionShape,
     /// Epilogue output operator
-    typename EpilogueOutputOp_ = typename DefaultGemmConfiguration<
+    typename EpilogueOutputOp_ = typename DefaultConvConfiguration<
         OperatorClass_, ArchTag_, ElementA_, ElementB_, ElementC_,
         ElementAccumulator_>::EpilogueOutputOp,
     /// Threadblock-level swizzling operator
@@ -198,20 +198,20 @@ template <
         typename threadblock::GemmIdentityThreadblockSwizzle<>,
     /// Number of stages used in the pipelined mainloop
     int Stages =
-        DefaultGemmConfiguration<OperatorClass_, ArchTag_, ElementA_, ElementB_,
+        DefaultConvConfiguration<OperatorClass_, ArchTag_, ElementA_, ElementB_,
                                  ElementC_, ElementAccumulator_>::kStages,
     /// Access granularity of A matrix in units of elements
     int AlignmentA =
-        DefaultGemmConfiguration<OperatorClass_, ArchTag_, ElementA_, ElementB_,
+        DefaultConvConfiguration<OperatorClass_, ArchTag_, ElementA_, ElementB_,
                                  ElementC_, ElementAccumulator_>::kAlignmentA,
     /// Access granularity of B matrix in units of elements
     int AlignmentB =
-        DefaultGemmConfiguration<OperatorClass_, ArchTag_, ElementA_, ElementB_,
+        DefaultConvConfiguration<OperatorClass_, ArchTag_, ElementA_, ElementB_,
                                  ElementC_, ElementAccumulator_>::kAlignmentB,
     /// If true, kernel supports split-K with serial reduction
     bool SplitKSerial = false,
     /// Operation performed by GEMM
-    typename Operator_ = typename DefaultGemmConfiguration<
+    typename Operator_ = typename DefaultConvConfiguration<
         OperatorClass_, ArchTag_, ElementA_, ElementB_, ElementC_,
         ElementAccumulator_>::Operator,
     /// Whether Beta is zero or not

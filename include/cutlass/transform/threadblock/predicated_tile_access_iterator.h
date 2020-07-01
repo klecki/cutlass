@@ -503,7 +503,7 @@ class PredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear,
 
 ////////////////////////////////////////////////////////////////////////////////
 
-/// Specialization of PredicatedTileAccessIterator for pitch-linear data.
+/// Specialization of PredicatedTileAccessIterator for pitch-linear data. Column-major
 ///
 /// Satisfies: ForwardTileIteratorConcept |
 ///            ReadableContiguousTileIteratorConcept |
@@ -679,7 +679,7 @@ class PredicatedTileAccessIterator<Shape_, Element_, layout::ColumnMajor,
 
 ////////////////////////////////////////////////////////////////////////////////
 
-/// Specialization of PredicatedTileAccessIterator for pitch-linear data.
+/// Specialization of PredicatedTileAccessIterator for row-major data, underlying is pitch-linear
 ///
 /// Satisfies: ForwardTileIteratorConcept |
 ///            ReadableContiguousTileIteratorConcept |

@@ -23,7 +23,7 @@
  *
  **************************************************************************************************/
 /*! \file
-    \brief Templates implementing how threads are mapped to a given tile. 
+    \brief Templates implementing how threads are mapped to a given tile.
 
 */
 
@@ -57,7 +57,7 @@ template <
   int ElementsPerAccess = 1
 >
 struct PitchLinearStripminedThreadMap {
-  
+
   /// Tensor coordinate
   using TensorCoord = layout::PitchLinearCoord;
 
@@ -67,7 +67,7 @@ struct PitchLinearStripminedThreadMap {
   /// Number of threads total
   static int const kThreads = Threads;
 
-  /// Extract vector length from Layout
+  /// Extract vector length from Layout // THIS IS BASICALLY 1 ALMOST EVERYWHERE
   static int const kElementsPerAccess = ElementsPerAccess;
 
   /// Shape of access by each thread
@@ -78,7 +78,7 @@ struct PitchLinearStripminedThreadMap {
 
     static_assert(!(Shape::kContiguous % kElementsPerAccess), "");
 
-    static_assert(!((Shape::kContiguous * Shape::kStrided) % (kThreads * kElementsPerAccess)), 
+    static_assert(!((Shape::kContiguous * Shape::kStrided) % (kThreads * kElementsPerAccess)),
       "Shape must be divisible thread count.");
 
     /// Shape of the tile in units of vectors
@@ -95,6 +95,7 @@ struct PitchLinearStripminedThreadMap {
   };
 
   /// Number of iterations by each thread
+  // THIS GIVES US THE 4, from Continuous * Strided
   using Iterations = typename platform::conditional<
     Threads >= Detail::ShapeVec::kContiguous,
     layout::PitchLinearShape<
@@ -125,9 +126,9 @@ struct PitchLinearStripminedThreadMap {
   /// (in units of Elements)
   CUTLASS_HOST_DEVICE
   static TensorCoord initial_offset(int thread_id) {
-    
+
     return TensorCoord(
-      (thread_id % Detail::ShapeVec::kContiguous) * kElementsPerAccess, 
+      (thread_id % Detail::ShapeVec::kContiguous) * kElementsPerAccess,
       thread_id / Detail::ShapeVec::kContiguous);
   }
 };
@@ -149,9 +150,9 @@ struct PitchLinearTilePolicyStripminedThreadContiguous
 
   using Iterations = layout::PitchLinearShape<
                       Shape::kContiguous / (kThreads * kElementsPerAccess),
-                      Shape::kStrided>;                      
+                      Shape::kStrided>;
 
-  using Delta = layout::PitchLinearShape<1, 1>;  
+  using Delta = layout::PitchLinearShape<1, 1>;
 
   CUTLASS_HOST_DEVICE
   static TensorCoord initial_offset(int thread_id)
@@ -169,7 +170,7 @@ struct PitchLinearTilePolicyStripminedThreadStrided
 {
   static_assert((Shape::kStrided % Threads == 0),
                 "Strided shape must divide number of threads");
-  
+
   using TensorCoord = layout::PitchLinearCoord;
 
   static int const kThreads = Threads;
@@ -177,16 +178,16 @@ struct PitchLinearTilePolicyStripminedThreadStrided
 
   using Iterations = layout::PitchLinearShape<
                       Shape::kContiguous / kElementsPerAccess,
-                      Shape::kStrided / kThreads>;       
+                      Shape::kStrided / kThreads>;
 
-  using Delta = layout::PitchLinearShape<1, 1>;  
+  using Delta = layout::PitchLinearShape<1, 1>;
 
   using ShapeVec = Shape;
 
   CUTLASS_HOST_DEVICE
   static TensorCoord initial_offset(int thread_id)
   {
-    
+
     return TensorCoord(0, thread_id * Iterations::kStrided);
   }
 };
@@ -310,7 +311,7 @@ struct PitchLinearWarpRakedThreadMap {
     };
 
     // This is the offset of a thread within a threadblock tile (units of vectors)
-    layout::PitchLinearCoord thread_offset_in_threadblock_tile_vec = 
+    layout::PitchLinearCoord thread_offset_in_threadblock_tile_vec =
       warp_footprint * warp_offset + thread_offset_in_warp;
 
     // This is the offset of a thread within a threadblock tile (units of elements)
@@ -446,7 +447,7 @@ struct TransposePitchLinearThreadMapSimt {
 
     static_assert(kElementsPerAccess == 1 , "Simt transpose requires elements per access to be 1");
     ///< Iterations along each dimension (concept: PitchLinearShape)
-    using Iterations = 
+    using Iterations =
         layout::PitchLinearShape<ThreadMap::Iterations::kStrided,
         ThreadMap::Iterations::kContiguous>;
 
@@ -457,7 +458,7 @@ struct TransposePitchLinearThreadMapSimt {
 
     ///< Delta betweeen accesses (units of elements, concept: PitchLinearShape)
     using Delta =
-        layout::PitchLinearShape<ThreadMap::Delta::kStrided, 
+        layout::PitchLinearShape<ThreadMap::Delta::kStrided,
         ThreadMap::Delta::kContiguous>;
 
 
@@ -535,12 +536,12 @@ struct PitchLinearWarpStripedThreadMap {
 
     // Divide it into the number of warps, first partitioning the strided dimension then the
     // contiguous.
-    static int const kWarpsStrided = 
-      (WarpAccessIterations::kStrided >= kWarpCount 
+    static int const kWarpsStrided =
+      (WarpAccessIterations::kStrided >= kWarpCount
         ? kWarpCount : (kWarpCount / WarpAccessIterations::kStrided));
 
-    static int const kWarpsContiguous = 
-      (kWarpCount > WarpAccessIterations::kStrided ? 
+    static int const kWarpsContiguous =
+      (kWarpCount > WarpAccessIterations::kStrided ?
         WarpAccessIterations::kContiguous / kWarpsStrided : 1);
 
     /// Arrangement of warps within a threadblock-scoped tile
@@ -594,7 +595,7 @@ struct PitchLinearWarpStripedThreadMap {
     };
 
     // This is the offset of a thread within a threadblock tile (units of vectors)
-    layout::PitchLinearCoord thread_offset_in_threadblock_tile_vec = 
+    layout::PitchLinearCoord thread_offset_in_threadblock_tile_vec =
       warp_footprint * warp_offset + thread_offset_in_warp;
 
     // This is the offset of a thread within a threadblock tile (units of elements)
@@ -729,7 +730,7 @@ struct TransposePitchLinearThreadMap2DThreadTile {
 
     static_assert(kElementsPerAccess > 1 , "Simt transpose requires elements per access to be 1");
     ///< Iterations along each dimension (concept: PitchLinearShape)
-    using Iterations = 
+    using Iterations =
         layout::PitchLinearShape<ThreadMap::Iterations::kStrided,
         ThreadMap::Iterations::kContiguous>;
 
@@ -740,7 +741,7 @@ struct TransposePitchLinearThreadMap2DThreadTile {
 
     ///< Delta betweeen accesses (units of elements, concept: PitchLinearShape)
     using Delta =
-        layout::PitchLinearShape<ThreadMap::Delta::kStrided, 
+        layout::PitchLinearShape<ThreadMap::Delta::kStrided,
         ThreadMap::Delta::kContiguous>;
 
 

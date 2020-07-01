@@ -233,7 +233,10 @@ class PredicatedTileIterator<Shape_, Element_, layout::PitchLinear, AdvanceRank,
       /// Initial offset of threadblock
       TensorCoord const &threadblock_offset)
       : address_iterator_(params.params_, pointer, extent, thread_id,
-                          threadblock_offset) {}
+                          threadblock_offset) {
+    PRINT_IF
+      printf("PredicatedTileIterator ThreadMap::Iterations::kCount: %d ThreadMap::kElementsPerAccess: %d\n", ThreadMap::Iterations::kCount, ThreadMap::kElementsPerAccess);
+  }
 
   /// Construct a PredicatedTileIterator with zero threadblock offset
   CUTLASS_HOST_DEVICE
@@ -260,6 +263,8 @@ class PredicatedTileIterator<Shape_, Element_, layout::PitchLinear, AdvanceRank,
   /// pointer.
   CUTLASS_HOST_DEVICE
   PredicatedTileIterator &operator++() {
+    // PRINT_IF
+    //   printf("PredicatedTileIterator++\n");
     if (kAdvanceRank)
       address_iterator_.add_tile_offset({0, 1});
     else

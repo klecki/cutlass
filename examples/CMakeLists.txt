@@ -35,7 +35,7 @@ function(cutlass_example_add_executable NAME)
     ${NAME}
     PRIVATE
     CUTLASS
-    # cutlass_tools_util_includes
+    cutlass_tools_util_includes
     )
 
   target_include_directories(

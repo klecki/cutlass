@@ -21,6 +21,6 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 add_subdirectory(util)
-add_subdirectory(library)
-add_subdirectory(profiler)
+# add_subdirectory(library)
+# add_subdirectory(profiler)
 

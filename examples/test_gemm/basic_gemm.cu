@@ -170,16 +170,42 @@ __global__ void InitializeMatrix_kernel(
   int columns,
   int seed = 0) {
 
-  int i = threadIdx.x + blockIdx.x * blockDim.x;
-  int j = threadIdx.y + blockIdx.y * blockDim.y;
+  int row = threadIdx.x + blockIdx.x * blockDim.x;
+  int col = threadIdx.y + blockIdx.y * blockDim.y;
 
-  if (i < rows && j < columns) {
-    int offset = i * ldm + j;
+  if (row < rows && col < columns) {
+    int offset = row * ldm + col;
 
     // Generate arbitrary elements.
-    int const k = 16807;
-    int const m = 16;
-    T value = T(((offset + seed) * k % m) - m / 2); // TODO modulo something
+    // int const k = 16807;
+    // int const m = 16;
+    // T value = T(((offset + seed) * k % m) - m / 2); // TODO modulo something
+    T value = 1000000 + row * 1000 + col;
+
+    matrix[offset] = value;
+  }
+}
+
+// the "B" matrix basically
+template <typename T>
+__global__ void InitializeMatrix_kernel_col_invariant(
+  T *matrix,
+  int ldm,
+  int rows,
+  int columns,
+  int seed = 0) {
+
+  int row = threadIdx.x + blockIdx.x * blockDim.x;
+  int col = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (row < rows && col < columns) {
+    int offset = row * ldm + col;
+
+    // Generate arbitrary elements.
+    // int const k = 16807;
+    // int const m = 16;
+    // T value = T(((row + seed) * k % m) - m / 2); // TODO modulo something
+    T value = row * 1000 + col;
 
     matrix[offset] = value;
   }
@@ -200,11 +226,24 @@ cudaError_t InitializeMatrix(T *matrix, int ldm, int rows, int columns, int seed
   return cudaGetLastError();
 }
 
+template <typename T>
+cudaError_t InitializeMatrixColInvariant(T *matrix, int ldm, int rows, int columns, int seed = 0) {
+
+  dim3 block(16, 16);
+  dim3 grid(
+    (rows + block.x - 1) / block.x,
+    (columns + block.y - 1) / block.y
+  );
+
+  InitializeMatrix_kernel_col_invariant<<< grid, block >>>(matrix, ldm, rows, columns, seed);
+
+  return cudaGetLastError();
+}
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 /// Allocates device memory for a matrix then fills with arbitrary small integers.
 template <typename T>
-cudaError_t AllocateMatrix(T **matrix, int ldm, int rows, int columns, int seed = 0) {
+cudaError_t AllocateMatrix(T **matrix, int ldm, int rows, int columns, int seed = 0, bool col_invariant = false) {
   cudaError_t result;
 
   size_t sizeof_matrix = sizeof(T) * ldm * columns;
@@ -228,7 +267,14 @@ cudaError_t AllocateMatrix(T **matrix, int ldm, int rows, int columns, int seed 
   }
 
   // Initialize matrix elements to arbitrary small integers.
-  result = InitializeMatrix(*matrix, ldm, rows, columns, seed);
+  if (col_invariant) {
+    result = InitializeMatrixColInvariant(*matrix, ldm, rows, columns, seed);
+  }
+  else {
+    result = InitializeMatrix(*matrix, ldm, rows, columns, seed);
+  }
+
+
 
   if (result != cudaSuccess) {
     std::cerr << "Failed to initialize matrix: "
@@ -329,7 +375,7 @@ cudaError_t TestCutlassGemm(int M, int N, int K, A_type alpha, C_type beta) {
     return result;
   }
 
-  result = AllocateMatrix(&B, ldb, K, N, 17);
+  result = AllocateMatrix(&B, ldb, K, N, 17, true);
 
   if (result !=  cudaSuccess) {
     cudaFree(A);
