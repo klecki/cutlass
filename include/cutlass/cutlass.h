@@ -130,6 +130,21 @@ struct Debug {
   typename T::X x;
 };
 
+template <int idx = 0, typename... Ts>
+struct Debugx  {
+  template <int x = 0, int... p>
+  [[deprecated]] static int f() {
+    int a[x];
+    int z;
+    int y = z;
+    return x + y;
+  }
+  __attribute__((deprecated)) static const int x;
+};
+
+#define PRINT_IF if (threadIdx.x == 0)
+// #define PRINT_IF if (true)
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 static const int NUM_THREADS_PER_WARP = 32;
@@ -142,7 +157,7 @@ static const int NUM_THREADS_PER_QUAD_PAIR = NUM_THREADS_PER_QUAD * 2;
 /// Computes laneId within a warp
 CUTLASS_DEVICE
 int LaneId() {
-  int ret; 
+  int ret;
   asm ("mov.u32 %0, %%laneid;" : "=r"(ret));
   return ret;
 }
@@ -150,7 +165,7 @@ int LaneId() {
 /// Computes SM number the thread is running on
 CUTLASS_DEVICE
 int SmId() {
-  int ret; 
+  int ret;
   asm ("mov.u32 %0, %%smid;" : "=r"(ret));
   return ret;
 }

@@ -44,18 +44,21 @@ namespace kernel {
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
 template <
-  typename Mma_,                  ///! Threadblock-scoped matrix multiply-accumulate 
+  typename Mma_,                  ///! Threadblock-scoped matrix multiply-accumulate
   typename Epilogue_,             ///! Epilogue
   typename ThreadblockSwizzle_,   ///! Threadblock swizzling function
   bool SplitKSerial               ///! If true, code supporting split-K via serial reduction is enabled.
 >
 struct Gemm {
 
+
   using Mma = Mma_;
   using Epilogue = Epilogue_;
   using OutputOp = typename Epilogue::OutputOp;
   using ThreadblockSwizzle = ThreadblockSwizzle_;
   static bool const kSplitKSerial = SplitKSerial;
+
+  // int x__ = Debugx<100, Mma, Epilogue, OutputOp, ThreadblockSwizzle>::f();
 
   /// Warp count (concept: GemmShape)
   using WarpCount = typename Mma::WarpCount;
@@ -110,7 +113,7 @@ struct Gemm {
 
       int total_gemm_k_iterations = (problem_size.k() + Mma::Shape::kK - 1) / Mma::Shape::kK;
       int gemm_k_iterations = (total_gemm_k_iterations + grid_tiled_shape.k() - 1) / grid_tiled_shape.k();
-      
+
       gemm_k_size = gemm_k_iterations * Mma::Shape::kK;
 
     semaphore = workspace;
@@ -128,7 +131,7 @@ struct Gemm {
   //
 
   CUTLASS_HOST_DEVICE
-  Gemm() { } 
+  Gemm() { }
 
   /// Determines whether kernel satisfies alignment
     static Status can_implement(
@@ -177,6 +180,11 @@ struct Gemm {
 
     cutlass::gemm::GemmCoord threadblock_tile_offset = threadblock_swizzle.get_tile_offset();
 
+    PRINT_IF
+      printf("kernel::Gemm::operator() threadIdx: (%d, %d, %d), threadblock_tile_offset mnk:(%d, %d, %d), params.grid_tiled_shape: (%d, %d, %d) \n",
+      threadIdx.x, threadIdx.y, threadIdx.z, threadblock_tile_offset.m(), threadblock_tile_offset.n(), threadblock_tile_offset.k(),
+      params.grid_tiled_shape.m(), params.grid_tiled_shape.n(), params.grid_tiled_shape.k());
+
     // Early exit if CTA is out of range
     if (params.grid_tiled_shape.m() <= threadblock_tile_offset.m() ||
       params.grid_tiled_shape.n() <= threadblock_tile_offset.n()) {
@@ -184,7 +192,8 @@ struct Gemm {
       return;
     }
 
-    // Compute initial location in logical coordinates
+    // Compute initial location in logical coordinates // KL: all threads have the same value here
+    // we need to make this "more virtual"
     cutlass::MatrixCoord tb_offset_A{
       threadblock_tile_offset.m() * Mma::Shape::kM,
       threadblock_tile_offset.k() * params.gemm_k_size,
@@ -194,19 +203,28 @@ struct Gemm {
       threadblock_tile_offset.k() * params.gemm_k_size,
       threadblock_tile_offset.n() * Mma::Shape::kN
     };
+    PRINT_IF
+      printf("kernel::Gemm::operator() threadIdx: (%d, %d, %d), A  row, col:(%d, %d), B row, col: (%d, %d) \n",
+      threadIdx.x, threadIdx.y, threadIdx.z, tb_offset_A.row(), tb_offset_A.column(), tb_offset_B.row(), tb_offset_B.column());
 
     // Problem size is a function of threadblock index in the K dimension
     int problem_size_k = min(
-      params.problem_size.k(), 
+      params.problem_size.k(),
       (threadblock_tile_offset.k() + 1) * params.gemm_k_size);
 
     // Compute threadblock-scoped matrix multiply-add
     int gemm_k_iterations = (problem_size_k - tb_offset_A.column() + Mma::Shape::kK - 1) / Mma::Shape::kK;
 
+
+    PRINT_IF
+      printf("kernel::Gemm::operator() threadIdx: (%d, %d, %d), problem_size_k: %d, gemm_k_iterations: %d \n",
+        threadIdx.x, threadIdx.y, threadIdx.z, problem_size_k, gemm_k_iterations);
+
     // Compute position within threadblock
     int thread_idx = threadIdx.x;
 
     // Construct iterators to A and B operands
+    // Global mem iterators
     typename Mma::IteratorA iterator_A(
       params.params_A,
       params.ref_A.data(),
@@ -267,7 +285,7 @@ struct Gemm {
 
     // If performing a reduction via split-K, fetch the initial synchronization
     if (kSplitKSerial && params.grid_tiled_shape.k() > 1) {
-      
+
       // Fetch the synchronization lock initially but do not block.
       semaphore.fetch();
 
@@ -294,14 +312,14 @@ struct Gemm {
     );
 
     Epilogue epilogue(
-      shared_storage.epilogue, 
-      thread_idx, 
-      warp_idx, 
+      shared_storage.epilogue,
+      thread_idx,
+      warp_idx,
       lane_idx);
 
     // Wait on the semaphore - this latency may have been covered by iterator construction
     if (kSplitKSerial && params.grid_tiled_shape.k() > 1) {
-        
+
       // For subsequent threadblocks, the source matrix is held in the 'D' tensor.
       if (threadblock_tile_offset.k()) {
         iterator_C = iterator_D;
@@ -313,14 +331,14 @@ struct Gemm {
     }
 
     // Execute the epilogue operator to update the destination tensor.
-    epilogue(output_op, iterator_D, accumulators, iterator_C); 
-    
+    epilogue(output_op, iterator_D, accumulators, iterator_C);
+
     //
     // Release the semaphore
     //
 
     if (kSplitKSerial && params.grid_tiled_shape.k() > 1) {
-      
+
       int lock = 0;
       if (params.grid_tiled_shape.k() == threadblock_tile_offset.k() + 1) {
 

@@ -51,7 +51,7 @@ namespace threadblock {
 template <
   /// Size of the Gemm problem - concept: gemm::GemmShape<>
   typename Shape_,
-  /// Iterates over tiles of A operand in global memory 
+  /// Iterates over tiles of A operand in global memory
   //  (concept: ReadableTileIterator | ForwardTileIterator | MaskedTileIterator)
   typename IteratorA_,
   /// Iterates over tiles of A operand in shared memory
@@ -71,14 +71,14 @@ template <
   typename Policy_,
   /// Transformation applied to A operand
   typename TransformA_ = NumericArrayConverter<
-    typename SmemIteratorA_::Element, 
-    typename IteratorA_::Element, 
+    typename SmemIteratorA_::Element,
+    typename IteratorA_::Element,
     IteratorA_::Fragment::kElements>,
   ///
   /// Transformation applied to B operand
   typename TransformB_ = NumericArrayConverter<
-    typename SmemIteratorB_::Element, 
-    typename IteratorB_::Element, 
+    typename SmemIteratorB_::Element,
+    typename IteratorB_::Element,
     IteratorB_::Fragment::kElements>,
   /// Used for partial specialization
   typename Enable = bool
@@ -88,6 +88,7 @@ public:
 
   ///< Base class
   using Base = MmaBase<Shape_, Policy_, 2>;
+  // static const int x__ = Debugx<2222, Base>::f();
 
   using Shape = Shape_;             ///< Size of the Gemm problem - concept: gemm::GemmShape<>
   using IteratorA = IteratorA_;     ///< Iterates over tiles of A operand in global memory
@@ -168,6 +169,8 @@ public:
 
     int warp_idx_m = warp_idx_mn % Base::WarpCount::kM;
     int warp_idx_n = warp_idx_mn / Base::WarpCount::kM;
+    PRINT_IF
+      printf("MmaPipelined(): Thread: (%d, %d, %d), thread: %d, warp: %d, lane: %d, warp mnk (%d, %d, %d)\n", threadIdx.x, threadIdx.y, threadIdx.z, thread_idx, warp_idx, lane_idx, warp_idx_m, warp_idx_n, warp_idx_k);
 
     // Add per-warp offsets in units of warp-level tiles
     this->warp_tile_iterator_A_.add_tile_offset({warp_idx_m, Base::kWarpGemmIterations * warp_idx_k});
@@ -188,6 +191,8 @@ public:
     //
     // Prologue
     //
+    PRINT_IF
+      printf("MmaPipelined::operator() prologue\n");
 
     // Perform accumulation in the 'd' output operand
     accum = src_accum;
@@ -236,12 +241,15 @@ public:
       iterator_B.clear_mask();
     }
 
-    // Issue loads during the first warp-level matrix multiply-add *AFTER* issuing 
+    // Issue loads during the first warp-level matrix multiply-add *AFTER* issuing
     // shared memory loads (which have the tighest latency requirement).
 
     //
     // Mainloop
     //
+
+    PRINT_IF
+      printf("MmaPipelined::operator() main_loop gemm_k_iterations %d, Base::kWarpGemmIterations: %d\n", gemm_k_iterations, Base::kWarpGemmIterations);
 
     // Note: The main loop does not support Base::kWarpGemmIterations == 2.
     CUTLASS_GEMM_LOOP
@@ -264,7 +272,7 @@ public:
           this->smem_iterator_B_.store(transform_B(tb_frag_B));
 
           __syncthreads();
-          
+
           ++this->smem_iterator_A_;
           ++this->smem_iterator_B_;
 
@@ -286,7 +294,7 @@ public:
 
         this->warp_tile_iterator_A_.set_kgroup_index((warp_mma_k + 1) % Base::kWarpGemmIterations);
         this->warp_tile_iterator_B_.set_kgroup_index((warp_mma_k + 1) % Base::kWarpGemmIterations);
-        
+
         this->warp_tile_iterator_A_.load(warp_frag_A[(warp_mma_k + 1) % 2]);
         this->warp_tile_iterator_B_.load(warp_frag_B[(warp_mma_k + 1) % 2]);
 

@@ -24,10 +24,10 @@
  **************************************************************************************************/
 
 /*! \file
-    \brief 
+    \brief
       Default kernel-level GEMM definitions combine threadblock-scoped matrix multiply-add with
       the appropriate threadblock-scoped epilogue.
-  
+
       Note, CUTLASS epilogues universally target row-major outputs. Column-major outputs are
       accommodated by exchanging A and B operands and assuming transposed layouts. Partial
       specializations here choose 'device::GemmTransposed' to implement this functionality.
@@ -176,6 +176,7 @@ struct DefaultGemm<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB, kAlignment
 
   /// Define the kernel-level GEMM operator.
   using GemmKernel = kernel::Gemm<Mma, Epilogue, ThreadblockSwizzle, SplitKSerial>;
+  constexpr static int x__ = Debugx<80, Mma, Epilogue, GemmKernel>::f();
 };
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -261,6 +262,7 @@ struct DefaultGemm<
 
   /// Define the kernel-level GEMM operator.
   using GemmKernel = kernel::Gemm<Mma, Epilogue, ThreadblockSwizzle, SplitKSerial>;
+  constexpr static int x__ = Debugx<75, Mma, Epilogue, GemmKernel>::f();
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -329,6 +331,7 @@ struct DefaultGemm<
 
   /// Define the kernel-level GEMM operator.
   using GemmKernel = kernel::Gemm<Mma, Epilogue, ThreadblockSwizzle, SplitKSerial>;
+  constexpr static int x__ = Debugx<801, Mma, Epilogue, GemmKernel>::f();
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -394,6 +397,7 @@ struct DefaultGemm<ElementA, layout::ColumnMajorInterleaved<InterleavedK>,
 
   /// Define the kernel-level GEMM operator.
   using GemmKernel = kernel::Gemm<Mma, Epilogue, ThreadblockSwizzle, SplitKSerial>;
+  constexpr static int x__ = Debugx<751, Mma, Epilogue, GemmKernel>::f();
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -479,6 +483,8 @@ struct DefaultGemm<
 
   /// Define the kernel-level GEMM operator.
   using GemmKernel = kernel::Gemm<Mma, Epilogue, ThreadblockSwizzle, SplitKSerial>;
+
+  constexpr static int x__ = Debugx<70, Mma, Epilogue, GemmKernel>::f();
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -567,6 +573,8 @@ struct DefaultGemm<
 
   /// Define the kernel-level GEMM operator.
   using GemmKernel = kernel::Gemm<Mma, Epilogue, ThreadblockSwizzle, SplitKSerial>;
+
+  constexpr static int x__ = Debugx<50, Mma, Epilogue, GemmKernel>::f();
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -643,6 +651,7 @@ struct DefaultGemm<ElementA,
 
   /// Define the kernel-level GEMM operator.
   using GemmKernel = kernel::Gemm<Mma, Epilogue, ThreadblockSwizzle, SplitKSerial>;
+  constexpr static int x__ = Debugx<800, Mma, Epilogue, GemmKernel>::f();
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -720,6 +729,9 @@ struct DefaultGemm<int8_t, LayoutA, kAlignmentA, int8_t, LayoutB, kAlignmentB,
 
   /// Define the kernel-level GEMM operator.
   using GemmKernel = kernel::Gemm<Mma, Epilogue, ThreadblockSwizzle, SplitKSerial>;
+
+
+  constexpr static int x__ = Debugx<504, Mma, Epilogue, GemmKernel>::f();
 };
 
 #if defined(CUTLASS_ARCH_WMMA_ENABLED)
@@ -762,46 +774,47 @@ template <
     /// epilogue
     bool SplitKSerial,
     /// Operation performed by GEMM
-    typename Operator> 
+    typename Operator>
 struct DefaultGemm<
-  ElementA, LayoutA, kAlignmentA, 
-  ElementB, LayoutB, kAlignmentB, 
-  ElementC, LayoutC, 
-  ElementAccumulator, 
+  ElementA, LayoutA, kAlignmentA,
+  ElementB, LayoutB, kAlignmentB,
+  ElementC, LayoutC,
+  ElementAccumulator,
   arch::OpClassWmmaTensorOp,
-  ArchTag, 
+  ArchTag,
   ThreadblockShape, WarpShape, InstructionShape,
-  EpilogueOutputOp, 
-  ThreadblockSwizzle, 
-  Stages, 
+  EpilogueOutputOp,
+  ThreadblockSwizzle,
+  Stages,
   SplitKSerial,
   Operator> {
   /// Define the threadblock-scoped matrix multiply-accumulate
   using Mma = typename cutlass::gemm::threadblock::DefaultMma<
       ElementA, LayoutA, kAlignmentA,
       ElementB, LayoutB, kAlignmentB,
-      ElementAccumulator, LayoutC, 
-      arch::OpClassWmmaTensorOp, 
+      ElementAccumulator, LayoutC,
+      arch::OpClassWmmaTensorOp,
       ArchTag,
-      ThreadblockShape, 
-      WarpShape, 
-      InstructionShape, 
+      ThreadblockShape,
+      WarpShape,
+      InstructionShape,
       Stages,
       Operator>::ThreadblockMma;
 
   static const int kPartitionsK = ThreadblockShape::kK / WarpShape::kK;
 
-  /// Define the epilogue 
+  /// Define the epilogue
   using Epilogue = typename cutlass::epilogue::threadblock::DefaultEpilogueWmmaTensorOp<
       ThreadblockShape,
-      typename Mma::Operator, 
-      kPartitionsK, 
+      typename Mma::Operator,
+      kPartitionsK,
       EpilogueOutputOp,
       EpilogueOutputOp::kCount
   >::Epilogue;
 
   /// Define the kernel-level GEMM operator.
   using GemmKernel = kernel::Gemm<Mma, Epilogue, ThreadblockSwizzle, SplitKSerial>;
+  constexpr static int x__ = Debugx<30, Mma, Epilogue, GemmKernel>::f();
 };
 ////////////////////////////////////////////////////////////////////////////////
 #endif //CUTLASS_ARCH_WMMA_ENABLED

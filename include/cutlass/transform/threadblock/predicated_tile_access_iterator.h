@@ -97,8 +97,9 @@ class PredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear,
   using NonConstPointer = typename platform::remove_const<Element>::type *;
 
   static int const kAccessesPerVector = ThreadMap::kElementsPerAccess / AccessType::kElements;
-  
-  static_assert(!(ThreadMap::kElementsPerAccess % AccessType::kElements), 
+
+
+  static_assert(!(ThreadMap::kElementsPerAccess % AccessType::kElements),
     "Vectors implied by the thread map must be divisible by the access type.");
 
   static int const kPredicatesPerByte = 4;
@@ -107,7 +108,7 @@ class PredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear,
   static int const kPredicateCount = ThreadMap::Iterations::kCount * kAccessesPerVector;
 
   /// Number of 32b words containing predicates
-  static int const kPredicateByteCount = 
+  static int const kPredicateByteCount =
     (kPredicateCount + kPredicatesPerByte - 1) / kPredicatesPerByte;
   static int const kPredicateWordCount = (kPredicateByteCount + 3) / 4;
 
@@ -160,6 +161,8 @@ class PredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear,
       inc_next_ = inc_advance_ - LongIndex(ThreadMap::Iterations::kStrided - 1) *
                                      ThreadMap::Delta::kStrided * LongIndex(stride_) *
                                      sizeof_bits<Element>::value / 8;
+
+      printf("Params constructed: stride_: %d inc_strided_: %ld inc_next_: %ld inc_advance_: %ld\n", stride_, inc_strided_, inc_next_, inc_advance_);
     };
   };
 
@@ -220,7 +223,7 @@ class PredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear,
     for (int access_idx = 0; access_idx < ThreadMap::Iterations::kCount * kAccessesPerVector; ++access_idx) {
 
       int s = access_idx / (ThreadMap::Iterations::kContiguous * kAccessesPerVector);
-      
+
       int access_residual = access_idx % (ThreadMap::Iterations::kContiguous * kAccessesPerVector);
 
       int c = access_residual / kAccessesPerVector;
@@ -250,7 +253,7 @@ class PredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear,
       int residual = pred_idx % kPredicatesPerWord;
       int byte_idx = residual / kPredicatesPerByte;
       int bit_idx = residual % kPredicatesPerByte;
-      
+
       predicates_[word_idx] |= (unsigned(guard) << (byte_idx * 8 + bit_idx));
 
     }
@@ -277,7 +280,7 @@ class PredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear,
             const_cast<NonConstPointer>(pointer))),
         extent_(extent),
         is_residue_tile_(true) {
-          
+
     TensorCoord residue_extent;
     if (kAdvanceRank) {
 
@@ -288,18 +291,18 @@ class PredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear,
 
       residue_offset_ = make_Coord(0, residue_size);
       residue_extent = make_Coord(
-        extent_.contiguous(), 
+        extent_.contiguous(),
         min(threadblock_offset.strided() + residue_size, extent_.strided())
       );
     } else {
-      
+
       Index residue_size = (extent_[kAdvanceRank] - threadblock_offset.contiguous()) % Shape::kContiguous;
       if (!residue_size) {
         residue_size = Shape::kContiguous;
       }
 
       residue_offset_ = make_Coord(residue_size, 0);
-      
+
       residue_extent = make_Coord(
         min(extent_.contiguous(), threadblock_offset.contiguous() + residue_size),
         extent_.strided()
@@ -386,7 +389,7 @@ class PredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear,
   CUTLASS_HOST_DEVICE
   AccessType *get() const {
     return reinterpret_cast<AccessType *>(
-        pointer_ + 
+        pointer_ +
         iteration_contiguous_ * (ThreadMap::Delta::kContiguous * sizeof_bits<Element>::value) / 8) + iteration_vector_;
   }
 
@@ -460,7 +463,7 @@ class PredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear,
 
   /// Sets the predicate mask, overriding value stored in predicate iterator
   CUTLASS_HOST_DEVICE
-  void set_mask(Mask const &mask) { 
+  void set_mask(Mask const &mask) {
     CUTLASS_PRAGMA_UNROLL
     for (int i = 0; i < kPredicateWordCount; ++i) {
       predicates_[i] = mask[i];
@@ -481,18 +484,18 @@ class PredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear,
   CUTLASS_HOST_DEVICE
   bool valid() {
 
-    
-    int pred_idx = 
+
+    int pred_idx =
       iteration_vector_ + kAccessesPerVector * (iteration_contiguous_ + iteration_strided_ * ThreadMap::Iterations::kContiguous);
 
     int word_idx = pred_idx / kPredicatesPerWord;
     int residual = pred_idx % kPredicatesPerWord;
     int byte_idx = residual / kPredicatesPerByte;
     int bit_idx = residual % kPredicatesPerByte;
-    
+
     bool pred = (predicates_[word_idx] & (1u << (byte_idx * 8 + bit_idx))) != 0;
     return pred;
-    
+
 
     //return true;
   }

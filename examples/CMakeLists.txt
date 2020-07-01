@@ -35,7 +35,7 @@ function(cutlass_example_add_executable NAME)
     ${NAME}
     PRIVATE
     CUTLASS
-    cutlass_tools_util_includes
+    # cutlass_tools_util_includes
     )
 
   target_include_directories(
@@ -58,19 +58,20 @@ add_custom_target(cutlass_examples)
 add_custom_target(test_examples)
 
 foreach(EXAMPLE
-  00_basic_gemm
-  01_cutlass_utilities
-  02_dump_reg_shmem
-  03_visualize_layout
-  04_tile_iterator
-  05_batched_gemm
-  06_splitK_gemm
-  07_volta_tensorop_gemm
-  08_turing_tensorop_gemm
-  10_planar_complex
-  11_planar_complex_array
-  12_gemm_bias_relu
-  13_fused_two_gemms
+  # 00_basic_gemm
+  # 01_cutlass_utilities
+  # 02_dump_reg_shmem
+  # 03_visualize_layout
+  # 04_tile_iterator
+  # 05_batched_gemm
+  # 06_splitK_gemm
+  # 07_volta_tensorop_gemm
+  # 08_turing_tensorop_gemm
+  # 10_planar_complex
+  # 11_planar_complex_array
+  # 12_gemm_bias_relu
+  # 13_fused_two_gemms
+  test_gemm
 )
 
   add_subdirectory(${EXAMPLE})
