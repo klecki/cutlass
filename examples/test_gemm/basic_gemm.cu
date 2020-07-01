@@ -60,7 +60,7 @@
 //
 // CUTLASS includes needed for single-precision GEMM kernel
 //
-#include "dali_impl.h"
+#include "device/conv.h"
 
 // Defines cutlass::gemm::device::Gemm, the generic Gemm computation template class.
 #include "cutlass/gemm/device/gemm.h"
@@ -110,7 +110,7 @@ cudaError_t CutlassSgemmNN(
   //                                                 C_type,        // Data-type of C matrix
   //                                                 ColumnMajor>; // Layout of C matrix
 
-  using CutlassGemm = cutlass::gemm::device::Gemm<A_type,        // Data-type of A matrix
+  using CutlassGemm = cutlass::gemm::device::Conv<A_type,        // Data-type of A matrix
                                                   RowMajor,  // Layout of A matrix
                                                   B_type,        // Data-type of B matrix
                                                   RowMajor,  // Layout of B matrix

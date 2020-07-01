@@ -25,3 +25,8 @@ cutlass_example_add_executable(
   basic_gemm.cu
 )
 
+target_include_directories(
+  test_gemm
+  PRIVATE
+  .
+  )
