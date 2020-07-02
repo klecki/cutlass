@@ -176,10 +176,10 @@ struct Conv {
   void operator()(Params const &params, SharedStorage &shared_storage) {
 
     // Compute threadblock location
-    ThreadblockSwizzle threadblock_swizzle;
+    ThreadblockSwizzle threadblock_swizzle; // todo: klecki: build TB swizzle for out of bounds accesses
 
     cutlass::gemm::GemmCoord threadblock_tile_offset = threadblock_swizzle.get_tile_offset();
-
+    // todo(klecki): here we know the actual tile!!! (global tile)
     PRINT_IF
       printf("kernel::Conv::operator() threadIdx: (%d, %d, %d), threadblock_tile_offset mnk:(%d, %d, %d), params.grid_tiled_shape: (%d, %d, %d) \n",
       threadIdx.x, threadIdx.y, threadIdx.z, threadblock_tile_offset.m(), threadblock_tile_offset.n(), threadblock_tile_offset.k(),
@@ -203,6 +203,7 @@ struct Conv {
       threadblock_tile_offset.k() * params.gemm_k_size,
       threadblock_tile_offset.n() * Mma::Shape::kN
     };
+    // todo(klecki): and here are the tile coordinates, woohoo
     PRINT_IF
       printf("kernel::Conv::operator() threadIdx: (%d, %d, %d), A  row, col:(%d, %d), B row, col: (%d, %d) \n",
       threadIdx.x, threadIdx.y, threadIdx.z, tb_offset_A.row(), tb_offset_A.column(), tb_offset_B.row(), tb_offset_B.column());

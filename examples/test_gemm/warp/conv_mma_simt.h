@@ -172,16 +172,7 @@ public:
   /// Iterates over the B operand in memory
   // Debug<LayoutB>::LayoutB x;
 
-  using IteratorB = MmaSimtTileIterator<
-    MatrixShape<Policy::LaneMmaShape::kK, Shape::kN>,
-    Operand::kB,
-    ElementB,
-    LayoutB,
-    Policy,
-    PartitionsK,
-    Shape::kK
-  >;
-  // using IteratorB = ConvMmaSimtTileIterator<
+  // using IteratorB = MmaSimtTileIterator<
   //   MatrixShape<Policy::LaneMmaShape::kK, Shape::kN>,
   //   Operand::kB,
   //   ElementB,
@@ -190,6 +181,15 @@ public:
   //   PartitionsK,
   //   Shape::kK
   // >;
+  using IteratorB = ConvMmaSimtTileIterator<
+    MatrixShape<Policy::LaneMmaShape::kK, Shape::kN>,
+    Operand::kB,
+    ElementB,
+    LayoutB,
+    Policy,
+    PartitionsK,
+    Shape::kK
+  >;
 
   /// Storage for B tile
   using FragmentB = typename IteratorB::Fragment;

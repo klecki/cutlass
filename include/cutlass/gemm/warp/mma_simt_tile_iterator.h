@@ -801,7 +801,7 @@ public:
   CUTLASS_HOST_DEVICE
   ConvMmaSimtTileIterator(
     TensorRef ref,
-    int lane_id, int global_row, int global_col
+    int lane_id
   ) {
     PRINT_IF
       printf("ConvMmaSimtTileIterator(,)\n");
@@ -813,8 +813,8 @@ public:
       MatrixCoord(0, Policy::LaneMmaShape::kN);
     PRINT_IF
       printf("Offset: %d %d\n", lane_offset[0], lane_offset[1]);
-    row = global_row + lane_offset[0];
-    col = global_col + lane_offset[1];
+    row = lane_offset[0];
+    col = lane_offset[1];
 
     ref.add_coord_offset(lane_offset);
 
