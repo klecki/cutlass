@@ -37,7 +37,7 @@
 #include "cutlass/matrix_shape.h"
 
 #include "cutlass/gemm/gemm.h"
-#include "cutlass/gemm/threadblock/mma_base.h"
+#include "threadblock/conv_mma_base.h"
 
 // DEBUG
 // #include "cutlass/util/debug.h"
@@ -73,7 +73,7 @@ template <
   typename ElementC_,
   /// Data type of accumulator matrix
   typename LayoutC_,
-  /// Policy describing tuning details (concept: MmaPolicy)
+  /// Policy describing tuning details (concept: ConvMmaPolicy)
   typename Policy_,
   /// Transformation applied to A operand
   typename TransformA_ = NumericArrayConverter<
@@ -89,11 +89,11 @@ template <
   /// Used for partial specialization
   typename Enable = bool
 >
-class ConvMmaPipelined : public MmaBase<Shape_, Policy_, 2> {
+class ConvMmaPipelined : public ConvMmaBase<Shape_, Policy_, 2> {
 public:
 
   ///< Base class
-  using Base = MmaBase<Shape_, Policy_, 2>;
+  using Base = ConvMmaBase<Shape_, Policy_, 2>;
   // static const int x__ = Debugx<2222, Base>::f();
 
   using Shape = Shape_;             ///< Size of the Gemm problem - concept: gemm::GemmShape<>
@@ -212,29 +212,43 @@ public:
     // The last kblock is loaded in the prolog
     iterator_A.load(tb_frag_A);
     iterator_B.load(tb_frag_B);
+    __syncthreads();
+
     // int x__ = Debugx<FragmentB>::template f();
     // printf("%d", x__);
 
 
-    PRINT_IF
-      printf("***** FRAGMENT A ******\n");
-    __syncthreads();
-    debug::dump_fragment(tb_frag_A, 1);
+    // PRINT_IF
+    //   printf("***** FRAGMENT A ******\n");
+    // __syncthreads();
+    // debug::dump_fragment(tb_frag_A, 4);
 
-    PRINT_IF
-      printf("***** FRAGMENT B ******\n");
-    __syncthreads();
-    debug::dump_fragment(tb_frag_B, 1);
+    // PRINT_IF
+    //   printf("***** FRAGMENT B ******\n");
+    // __syncthreads();
+    // debug::dump_fragment(tb_frag_B, 4);
+    // return;
 
     __syncthreads();
-
-    // debug::dump_fragment(tb_frag_B);
 
     ++iterator_A;
     ++iterator_B;
 
     this->smem_iterator_A_.store(transform_A(tb_frag_A));
     this->smem_iterator_B_.store(transform_B(tb_frag_B));
+
+
+    // transform_A and B do only numerical tranformations?
+    // PRINT_IF
+    //   printf("***** FRAGMENT A ******\n");
+    // __syncthreads();
+    // debug::dump_fragment(transform_A(tb_frag_A), 4);
+
+    // PRINT_IF
+    //   printf("***** FRAGMENT B ******\n");
+    // __syncthreads();
+    // debug::dump_fragment(transform_B(tb_frag_B), 4);
+    // return;
 
     ++this->smem_iterator_A_;
     ++this->smem_iterator_B_;
@@ -287,6 +301,7 @@ public:
         // Load warp-level tiles from shared memory, wrapping to k offset if this is the last group
         // as the case may be.
 
+        // the last iteration, that's why we do the rollback after loading (klecki)
         if (warp_mma_k == Base::kWarpGemmIterations - 1) {
 
           // Write fragments to shared memory
@@ -315,6 +330,8 @@ public:
           smem_write_stage_idx ^= 1;
         }
 
+        // regular iteration (klecki)
+
         this->warp_tile_iterator_A_.set_kgroup_index((warp_mma_k + 1) % Base::kWarpGemmIterations);
         this->warp_tile_iterator_B_.set_kgroup_index((warp_mma_k + 1) % Base::kWarpGemmIterations);
 
@@ -324,6 +341,8 @@ public:
         ++this->warp_tile_iterator_A_;
         ++this->warp_tile_iterator_B_;
 
+
+        // overlap? start loading to gmem, so we can store it in "last" iter (klecki)
         if (warp_mma_k == 0) {
 
           iterator_A.load(tb_frag_A);

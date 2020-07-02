@@ -130,6 +130,11 @@ struct Debug {
   typename T::X x;
 };
 
+// template <typename T, int y>
+// struct Debug2 {
+//   typename T::X x;
+// };
+
 template <int idx = 0, typename... Ts>
 struct Debugx  {
   template <int x = 0, int... p>

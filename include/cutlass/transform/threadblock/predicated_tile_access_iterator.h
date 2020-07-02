@@ -129,6 +129,7 @@ class PredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear,
     int stride_;
     /// amount (in byte) to increment pointer to move to next access along
     /// strided dimension
+    /// (klecki): we can maybe introduce some wrapping?
     LongIndex inc_strided_;
     /// amount (in byte) to increment pointer from last access to first access
     /// of next tile

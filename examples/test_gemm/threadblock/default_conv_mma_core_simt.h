@@ -44,7 +44,7 @@
 #include "cutlass/transform/threadblock/regular_tile_iterator_pitch_linear_2dthreadtile.h"
 
 #include "cutlass/gemm/warp/mma_simt_policy.h"
-#include "cutlass/gemm/warp/mma_simt.h"
+#include "warp/conv_mma_simt.h"
 #include "threadblock/default_conv_mma_core.h"
 
 // for detail functions
@@ -78,332 +78,332 @@ namespace threadblock {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
-/// Partial specialization:
-///
-///   A: column-major
-///   B: row-major
-///   Operator: simt class
-///
-/// This uses the default warp-level operator given tile sizes
-template <
-    /// Shape of threadblock-scoped matrix multiply operator (concept:
-    /// GemmShape)
-    typename Shape_,
-    /// Shape of warp-level matrix multiply operator (concept: GemmShape)
-    typename WarpShape_,
-    /// Data type of A operand
-    typename ElementA_,
-    /// Data type of B operand
-    typename ElementB_,
-    /// Data type of accumulator
-    typename ElementC_,
-    /// Layout of accumulator
-    typename LayoutC_,
-    /// Operation performed by GEMM
-    typename Operator_>
-struct DefaultConvMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
-                      layout::ColumnMajor, ElementB_, layout::RowMajor,
-                      ElementC_, LayoutC_, arch::OpClassSimt, 2, Operator_
-                     > {
-  using Shape = Shape_;
-  using WarpShape = WarpShape_;
-  using InstructionShape = GemmShape<1, 1, 1>;
-  using ElementA = ElementA_;
-  using LayoutA = layout::ColumnMajor;
-  using ElementB = ElementB_;
-  using LayoutB = layout::RowMajor;
-  using ElementC = ElementC_;
-  using LayoutC = LayoutC_;
-  using OperatorClass = arch::OpClassSimt;
-  static int const PartitionsK = Shape::kK / WarpShape::kK;
+// /// Partial specialization:
+// ///
+// ///   A: column-major
+// ///   B: row-major
+// ///   Operator: simt class
+// ///
+// /// This uses the default warp-level operator given tile sizes
+// template <
+//     /// Shape of threadblock-scoped matrix multiply operator (concept:
+//     /// GemmShape)
+//     typename Shape_,
+//     /// Shape of warp-level matrix multiply operator (concept: GemmShape)
+//     typename WarpShape_,
+//     /// Data type of A operand
+//     typename ElementA_,
+//     /// Data type of B operand
+//     typename ElementB_,
+//     /// Data type of accumulator
+//     typename ElementC_,
+//     /// Layout of accumulator
+//     typename LayoutC_,
+//     /// Operation performed by GEMM
+//     typename Operator_>
+// struct DefaultConvMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
+//                       layout::ColumnMajor, ElementB_, layout::RowMajor,
+//                       ElementC_, LayoutC_, arch::OpClassSimt, 2, Operator_
+//                      > {
+//   using Shape = Shape_;
+//   using WarpShape = WarpShape_;
+//   using InstructionShape = GemmShape<1, 1, 1>;
+//   using ElementA = ElementA_;
+//   using LayoutA = layout::ColumnMajor;
+//   using ElementB = ElementB_;
+//   using LayoutB = layout::RowMajor;
+//   using ElementC = ElementC_;
+//   using LayoutC = LayoutC_;
+//   using OperatorClass = arch::OpClassSimt;
+//   static int const PartitionsK = Shape::kK / WarpShape::kK;
 
-  /// Default Operator
-  using Operator = Operator_;
+//   /// Default Operator
+//   using Operator = Operator_;
 
-  /// Number of warps present
-  using WarpCount = GemmShape<
-    Shape::kM / WarpShape::kM,
-    Shape::kN / WarpShape::kN,
-    PartitionsK
-  >;
+//   /// Number of warps present
+//   using WarpCount = GemmShape<
+//     Shape::kM / WarpShape::kM,
+//     Shape::kN / WarpShape::kN,
+//     PartitionsK
+//   >;
 
-  // Divisility requirements
-  static_assert(
-    !(Shape::kM % WarpShape::kM) &&
-    !(Shape::kN % WarpShape::kN),
-    "Threadblock-scoped GEMM should be divisible by warp-scoped GEMM size."
-  );
+//   // Divisility requirements
+//   static_assert(
+//     !(Shape::kM % WarpShape::kM) &&
+//     !(Shape::kN % WarpShape::kN),
+//     "Threadblock-scoped GEMM should be divisible by warp-scoped GEMM size."
+//   );
 
-  /// Number of threads per warp
-  static int const kWarpSize = warp::WarpSize<arch::OpClassSimt>::value;
+//   /// Number of threads per warp
+//   static int const kWarpSize = warp::WarpSize<arch::OpClassSimt>::value;
 
-  /// Number of threads total
-  static int const kThreads = WarpCount::kCount * kWarpSize;
+//   /// Number of threads total
+//   static int const kThreads = WarpCount::kCount * kWarpSize;
 
-  static int const kElementsPerAccess = 1;
+//   static int const kElementsPerAccess = 1;
 
-  //
-  // Shared memory layouts
-  //
+//   //
+//   // Shared memory layouts
+//   //
 
-  using SmemLayoutA = layout::ColumnMajor;
-  using SmemLayoutB = layout::RowMajor;
+//   using SmemLayoutA = layout::ColumnMajor;
+//   using SmemLayoutB = layout::RowMajor;
 
-  //
-  // Iterators to write to shared memory
-  //
+//   //
+//   // Iterators to write to shared memory
+//   //
 
-  /// ThreadMap of iterator A, will provide how many iterations we need to cover by all threads the whole shape (klecki)
-  using IteratorThreadMapA = transform::PitchLinearStripminedThreadMap<
-    layout::PitchLinearShape<Shape::kM, Shape::kK>,
-    kThreads,
-    kElementsPerAccess
-  >;
-
-
-  // DefaultConvMmaCore() {
-  //   PRINT_IF
-  //     printf("DefaultConvMmaCore: layout::PitchLinearShape<Shape::kM, Shape::kK> %d %d, kThreads: %d kElementsPerAccess: %d\n",Shape::kM, Shape::kK, kThreads, kElementsPerAccess);
-  // }
+//   /// ThreadMap of iterator A, will provide how many iterations we need to cover by all threads the whole shape (klecki)
+//   using IteratorThreadMapA = transform::PitchLinearStripminedThreadMap<
+//     layout::PitchLinearShape<Shape::kM, Shape::kK>,
+//     kThreads,
+//     kElementsPerAccess
+//   >;
 
 
-  /// Shared memory iterator to A operand
-  using SmemIteratorA = transform::threadblock::RegularTileIterator<
-    MatrixShape<Shape::kM, Shape::kK>,
-    ElementA,
-    SmemLayoutA,
-    1,
-    IteratorThreadMapA
-  >;
+//   // DefaultConvMmaCore() {
+//   //   PRINT_IF
+//   //     printf("DefaultConvMmaCore: layout::PitchLinearShape<Shape::kM, Shape::kK> %d %d, kThreads: %d kElementsPerAccess: %d\n",Shape::kM, Shape::kK, kThreads, kElementsPerAccess);
+//   // }
 
-  /// Policy of iterator B
-  using IteratorThreadMapB = transform::PitchLinearStripminedThreadMap<
-    layout::PitchLinearShape<Shape::kN, Shape::kK>,
-    kThreads,
-    kElementsPerAccess
-  >;
 
-  /// Shared memory iterator to B operand
-  using SmemIteratorB = transform::threadblock::RegularTileIterator<
-    MatrixShape<Shape::kK, Shape::kN>,
-    ElementB,
-    SmemLayoutB,
-    0,
-    IteratorThreadMapB
-  >;
+//   /// Shared memory iterator to A operand
+//   using SmemIteratorA = transform::threadblock::RegularTileIterator<
+//     MatrixShape<Shape::kM, Shape::kK>,
+//     ElementA,
+//     SmemLayoutA,
+//     1,
+//     IteratorThreadMapA
+//   >;
 
-  //
-  // Warp-level matrix multiply operator
-  //
+//   /// Policy of iterator B
+//   using IteratorThreadMapB = transform::PitchLinearStripminedThreadMap<
+//     layout::PitchLinearShape<Shape::kN, Shape::kK>,
+//     kThreads,
+//     kElementsPerAccess
+//   >;
 
-  // Define the warp-level op
-  static const int WarpNumThreadsM = detail::simt_get_warp_threads_m<WarpShape>();
-  static const int WarpNumThreadsN = kWarpSize / WarpNumThreadsM;
-  static const int ThreadTileM = WarpShape::kM / WarpNumThreadsM;
-  static const int ThreadTileN = WarpShape::kN / WarpNumThreadsN;
-  static_assert(!(WarpShape::kM % WarpNumThreadsM) && !(WarpShape::kN % WarpNumThreadsN),
-      "WarpShape must be divisible by ThreadTile shape.");
-  static const int LaneLayout = ThreadTileM > 4 && ThreadTileN > 4 ? 2 : 1;
-  static const int numElementsA = 128 / sizeof_bits<ElementA>::value;
-  static const int numElementsB = 128 / sizeof_bits<ElementB>::value;
-  static const int LaneM = cutlass::const_min(numElementsA, ThreadTileM);
-  static const int LaneN = cutlass::const_min(numElementsB, ThreadTileN);
-  // these should have max of thread tile also
-  using LaneMmaShape = cutlass::gemm::GemmShape<
-      LaneM,
-      LaneN,
-      1>;
-  using Policy = cutlass::gemm::warp::MmaSimtPolicy<
-      cutlass::MatrixShape<WarpNumThreadsM, WarpNumThreadsN>,   // WarpShape
-      cutlass::layout::RowMajorInterleaved<LaneLayout>,         // LaneLayout
-      LaneMmaShape
-  >;
+//   /// Shared memory iterator to B operand
+//   using SmemIteratorB = transform::threadblock::RegularTileIterator<
+//     MatrixShape<Shape::kK, Shape::kN>,
+//     ElementB,
+//     SmemLayoutB,
+//     0,
+//     IteratorThreadMapB
+//   >;
 
-  using MmaWarpSimt = cutlass::gemm::warp::MmaSimt<
-    WarpShape,    /// Size of the Gemm problem - concept: gemm::GemmShape<> 128, 128, 8
-    ElementA,     /// Data type of A elements
-    SmemLayoutA,  /// Layout of A matrix (concept: MatrixLayout)
-    ElementB,     /// Data type of B elements
-    SmemLayoutB,  /// Layout of B matrix (concept: MatrixLayout)
-    ElementC,     /// Element type of C matrix
-    LayoutC,      /// Layout of C matrix (concept: MatrixLayout)
-    Policy        /// Policy describing warp-level MmaSimtOp (concept: MmaSimtOp policy)
-    >;            /// Used for partial specialization
+//   //
+//   // Warp-level matrix multiply operator
+//   //
 
-  /// Policy used to define MmaPipelined
-  using MmaPolicy = MmaPolicy<
-    MmaWarpSimt,
-    MatrixShape<0, 0>,
-    MatrixShape<0, 0>,
-    WarpCount::kK
-  >;
-};
+//   // Define the warp-level op
+//   static const int WarpNumThreadsM = detail::simt_get_warp_threads_m<WarpShape>();
+//   static const int WarpNumThreadsN = kWarpSize / WarpNumThreadsM;
+//   static const int ThreadTileM = WarpShape::kM / WarpNumThreadsM;
+//   static const int ThreadTileN = WarpShape::kN / WarpNumThreadsN;
+//   static_assert(!(WarpShape::kM % WarpNumThreadsM) && !(WarpShape::kN % WarpNumThreadsN),
+//       "WarpShape must be divisible by ThreadTile shape.");
+//   static const int LaneLayout = ThreadTileM > 4 && ThreadTileN > 4 ? 2 : 1;
+//   static const int numElementsA = 128 / sizeof_bits<ElementA>::value;
+//   static const int numElementsB = 128 / sizeof_bits<ElementB>::value;
+//   static const int LaneM = cutlass::const_min(numElementsA, ThreadTileM);
+//   static const int LaneN = cutlass::const_min(numElementsB, ThreadTileN);
+//   // these should have max of thread tile also
+//   using LaneMmaShape = cutlass::gemm::GemmShape<
+//       LaneM,
+//       LaneN,
+//       1>;
+//   using Policy = cutlass::gemm::warp::MmaSimtPolicy<
+//       cutlass::MatrixShape<WarpNumThreadsM, WarpNumThreadsN>,   // WarpShape
+//       cutlass::layout::RowMajorInterleaved<LaneLayout>,         // LaneLayout
+//       LaneMmaShape
+//   >;
 
-/////////////////////////////////////////////////////////////////////////////////////////////////
+//   using MmaWarpSimt = cutlass::gemm::warp::ConvMmaSimt<
+//     WarpShape,    /// Size of the Gemm problem - concept: gemm::GemmShape<> 128, 128, 8
+//     ElementA,     /// Data type of A elements
+//     SmemLayoutA,  /// Layout of A matrix (concept: MatrixLayout)
+//     ElementB,     /// Data type of B elements
+//     SmemLayoutB,  /// Layout of B matrix (concept: MatrixLayout)
+//     ElementC,     /// Element type of C matrix
+//     LayoutC,      /// Layout of C matrix (concept: MatrixLayout)
+//     Policy        /// Policy describing warp-level MmaSimtOp (concept: MmaSimtOp policy)
+//     >;            /// Used for partial specialization
 
-/// Partial specialization:
-///
-///   A: row-major
-///   B: column-major
-///   Operator: simt class
-///
-/// This uses the default warp-level operator given tile sizes
-template <
-    /// Shape of threadblock-scoped matrix multiply operator (concept:
-    /// GemmShape)
-    typename Shape_,
-    /// Shape of warp-level matrix multiply operator (concept: GemmShape)
-    typename WarpShape_,
-    /// Data type of A operand
-    typename ElementA_,
-    /// Data type of B operand
-    typename ElementB_,
-    /// Data type of accumulator
-    typename ElementC_,
-    /// Layout of accumulator
-    typename LayoutC_,
-    /// Operation performed by GEMM
-    typename Operator_>
-struct DefaultConvMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
-                      layout::RowMajor, ElementB_, layout::ColumnMajor,
-                      ElementC_, LayoutC_, arch::OpClassSimt, 2, Operator_
-                     > {
-  using Shape = Shape_;
-  using WarpShape = WarpShape_;
-  using InstructionShape = GemmShape<1, 1, 1>;
-  using ElementA = ElementA_;
-  using LayoutA = layout::RowMajor;
-  using ElementB = ElementB_;
-  using LayoutB = layout::ColumnMajor;
-  using ElementC = ElementC_;
-  using LayoutC = LayoutC_;
-  using OperatorClass = arch::OpClassSimt;
-  static int const PartitionsK = Shape::kK / WarpShape::kK;
+//   /// Policy used to define MmaPipelined
+//   using MmaPolicy = MmaPolicy<
+//     MmaWarpSimt,
+//     MatrixShape<0, 0>,
+//     MatrixShape<0, 0>,
+//     WarpCount::kK
+//   >;
+// };
 
-  /// Default Operator
-  using Operator = Operator_;
+// /////////////////////////////////////////////////////////////////////////////////////////////////
 
-  /// Number of warps present
-  using WarpCount = GemmShape<
-    Shape::kM / WarpShape::kM,
-    Shape::kN / WarpShape::kN,
-    PartitionsK
-  >;
+// /// Partial specialization:
+// ///
+// ///   A: row-major
+// ///   B: column-major
+// ///   Operator: simt class
+// ///
+// /// This uses the default warp-level operator given tile sizes
+// template <
+//     /// Shape of threadblock-scoped matrix multiply operator (concept:
+//     /// GemmShape)
+//     typename Shape_,
+//     /// Shape of warp-level matrix multiply operator (concept: GemmShape)
+//     typename WarpShape_,
+//     /// Data type of A operand
+//     typename ElementA_,
+//     /// Data type of B operand
+//     typename ElementB_,
+//     /// Data type of accumulator
+//     typename ElementC_,
+//     /// Layout of accumulator
+//     typename LayoutC_,
+//     /// Operation performed by GEMM
+//     typename Operator_>
+// struct DefaultConvMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
+//                       layout::RowMajor, ElementB_, layout::ColumnMajor,
+//                       ElementC_, LayoutC_, arch::OpClassSimt, 2, Operator_
+//                      > {
+//   using Shape = Shape_;
+//   using WarpShape = WarpShape_;
+//   using InstructionShape = GemmShape<1, 1, 1>;
+//   using ElementA = ElementA_;
+//   using LayoutA = layout::RowMajor;
+//   using ElementB = ElementB_;
+//   using LayoutB = layout::ColumnMajor;
+//   using ElementC = ElementC_;
+//   using LayoutC = LayoutC_;
+//   using OperatorClass = arch::OpClassSimt;
+//   static int const PartitionsK = Shape::kK / WarpShape::kK;
 
-  // Divisility requirements
-  static_assert(
-    !(Shape::kM % WarpShape::kM) &&
-    !(Shape::kN % WarpShape::kN),
-    "Threadblock-scoped GEMM should be divisible by warp-scoped GEMM size."
-  );
+//   /// Default Operator
+//   using Operator = Operator_;
 
-  /// Number of threads per warp
-  static int const kWarpSize = warp::WarpSize<arch::OpClassSimt>::value;
+//   /// Number of warps present
+//   using WarpCount = GemmShape<
+//     Shape::kM / WarpShape::kM,
+//     Shape::kN / WarpShape::kN,
+//     PartitionsK
+//   >;
 
-  /// Number of threads total
-  static int const kThreads = WarpCount::kCount * kWarpSize;
+//   // Divisility requirements
+//   static_assert(
+//     !(Shape::kM % WarpShape::kM) &&
+//     !(Shape::kN % WarpShape::kN),
+//     "Threadblock-scoped GEMM should be divisible by warp-scoped GEMM size."
+//   );
 
-  static int const kElementsPerAccess = 1;
+//   /// Number of threads per warp
+//   static int const kWarpSize = warp::WarpSize<arch::OpClassSimt>::value;
 
-  //
-  // Shared memory layouts
-  //
+//   /// Number of threads total
+//   static int const kThreads = WarpCount::kCount * kWarpSize;
 
-  using SmemLayoutA = layout::ColumnMajor;
-  using SmemLayoutB = layout::RowMajor;
+//   static int const kElementsPerAccess = 1;
 
-  //
-  // Iterators to write to shared memory
-  //
+//   //
+//   // Shared memory layouts
+//   //
 
-  /// ThreadMap of iterator A
-  using IteratorThreadMapA = transform::PitchLinearStripminedThreadMap<
-    layout::PitchLinearShape<Shape::kK, Shape::kM>,
-    kThreads,
-    kElementsPerAccess
-  >;
+//   using SmemLayoutA = layout::ColumnMajor;
+//   using SmemLayoutB = layout::RowMajor;
 
-  /// Transpose the ThreadMap of iterator A
-  using SmemThreadMapA = transform::TransposePitchLinearThreadMapSimt<IteratorThreadMapA>;
+//   //
+//   // Iterators to write to shared memory
+//   //
 
-  /// Shared memory iterator to A operand
-  using SmemIteratorA = transform::threadblock::RegularTileIterator<
-    MatrixShape<Shape::kM, Shape::kK>,
-    ElementA,
-    SmemLayoutA,
-    1,
-    SmemThreadMapA // was IteratorThreadMapA
-  >;
+//   /// ThreadMap of iterator A
+//   using IteratorThreadMapA = transform::PitchLinearStripminedThreadMap<
+//     layout::PitchLinearShape<Shape::kK, Shape::kM>,
+//     kThreads,
+//     kElementsPerAccess
+//   >;
 
-  /// ThreadMap of iterator B
-  using IteratorThreadMapB = transform::PitchLinearStripminedThreadMap<
-    layout::PitchLinearShape<Shape::kK, Shape::kN>,
-    kThreads,
-    kElementsPerAccess
-  >;
+//   /// Transpose the ThreadMap of iterator A
+//   using SmemThreadMapA = transform::TransposePitchLinearThreadMapSimt<IteratorThreadMapA>;
 
-  /// Transpose the ThreadMap of iterator A
-  using SmemThreadMapB = transform::TransposePitchLinearThreadMapSimt<IteratorThreadMapB>;
+//   /// Shared memory iterator to A operand
+//   using SmemIteratorA = transform::threadblock::RegularTileIterator<
+//     MatrixShape<Shape::kM, Shape::kK>,
+//     ElementA,
+//     SmemLayoutA,
+//     1,
+//     SmemThreadMapA // was IteratorThreadMapA
+//   >;
 
-  /// Shared memory iterator to B operand
-  using SmemIteratorB = transform::threadblock::RegularTileIterator<
-    MatrixShape<Shape::kK, Shape::kN>,
-    ElementB,
-    SmemLayoutB,
-    0,
-    SmemThreadMapB // was IteratorThreadMapA
-  >;
+//   /// ThreadMap of iterator B
+//   using IteratorThreadMapB = transform::PitchLinearStripminedThreadMap<
+//     layout::PitchLinearShape<Shape::kK, Shape::kN>,
+//     kThreads,
+//     kElementsPerAccess
+//   >;
 
-  //
-  // Warp-level matrix multiply operator
-  //
+//   /// Transpose the ThreadMap of iterator A
+//   using SmemThreadMapB = transform::TransposePitchLinearThreadMapSimt<IteratorThreadMapB>;
 
-  // Define the warp-level op
-  static const int WarpNumThreadsM = detail::simt_get_warp_threads_m<WarpShape>();
-  static const int WarpNumThreadsN = kWarpSize / WarpNumThreadsM;
-  static const int ThreadTileM = WarpShape::kM / WarpNumThreadsM;
-  static const int ThreadTileN = WarpShape::kN / WarpNumThreadsN;
-  static_assert(!(WarpShape::kM % WarpNumThreadsM) && !(WarpShape::kN % WarpNumThreadsN),
-      "WarpShape must be divisible by ThreadTile shape.");
-  static const int LaneLayout = ThreadTileM > 4 && ThreadTileN > 4 ? 2 : 1;
-  static const int numElementsA = 128 / sizeof_bits<ElementA>::value;
-  static const int numElementsB = 128 / sizeof_bits<ElementB>::value;
-  static const int LaneM = cutlass::const_min(numElementsA, ThreadTileM);
-  static const int LaneN = cutlass::const_min(numElementsB, ThreadTileN);
+//   /// Shared memory iterator to B operand
+//   using SmemIteratorB = transform::threadblock::RegularTileIterator<
+//     MatrixShape<Shape::kK, Shape::kN>,
+//     ElementB,
+//     SmemLayoutB,
+//     0,
+//     SmemThreadMapB // was IteratorThreadMapA
+//   >;
 
-  static int const kPaddingM = detail::simt_transpose_padding(kWarpSize, Shape::kK, sizeof_bits<ElementA>::value);
-  static int const kPaddingN = detail::simt_transpose_padding(kWarpSize, Shape::kK, sizeof_bits<ElementB>::value);
+//   //
+//   // Warp-level matrix multiply operator
+//   //
 
-  // these should have max of thread tile also
-  using LaneMmaShape = cutlass::gemm::GemmShape<
-      LaneM,
-      LaneN,
-      1>;
-  using Policy = cutlass::gemm::warp::MmaSimtPolicy<
-      cutlass::MatrixShape<WarpNumThreadsM, WarpNumThreadsN>,   // WarpShape
-      cutlass::layout::RowMajorInterleaved<LaneLayout>,         // LaneLayout
-      LaneMmaShape
-  >;
+//   // Define the warp-level op
+//   static const int WarpNumThreadsM = detail::simt_get_warp_threads_m<WarpShape>();
+//   static const int WarpNumThreadsN = kWarpSize / WarpNumThreadsM;
+//   static const int ThreadTileM = WarpShape::kM / WarpNumThreadsM;
+//   static const int ThreadTileN = WarpShape::kN / WarpNumThreadsN;
+//   static_assert(!(WarpShape::kM % WarpNumThreadsM) && !(WarpShape::kN % WarpNumThreadsN),
+//       "WarpShape must be divisible by ThreadTile shape.");
+//   static const int LaneLayout = ThreadTileM > 4 && ThreadTileN > 4 ? 2 : 1;
+//   static const int numElementsA = 128 / sizeof_bits<ElementA>::value;
+//   static const int numElementsB = 128 / sizeof_bits<ElementB>::value;
+//   static const int LaneM = cutlass::const_min(numElementsA, ThreadTileM);
+//   static const int LaneN = cutlass::const_min(numElementsB, ThreadTileN);
 
-  using MmaWarpSimt = cutlass::gemm::warp::MmaSimt<
-      WarpShape,      /// Size of the Gemm problem - concept: gemm::GemmShape<> 128, 128, 8
-      ElementA,       /// Data type of A elements
-      SmemLayoutA,    /// Layout of A matrix (concept: MatrixLayout)
-      ElementB,       /// Data type of B elements
-      SmemLayoutB,    /// Layout of B matrix (concept: MatrixLayout)
-      ElementC,       /// Element type of C matrix
-      LayoutC,        /// Layout of C matrix (concept: MatrixLayout)
-      Policy          /// Policy describing warp-level MmaSimtOp (concept: MmaSimtOp policy)
-  >;
+//   static int const kPaddingM = detail::simt_transpose_padding(kWarpSize, Shape::kK, sizeof_bits<ElementA>::value);
+//   static int const kPaddingN = detail::simt_transpose_padding(kWarpSize, Shape::kK, sizeof_bits<ElementB>::value);
 
-  /// Policy used to define MmaPipelined
-  using MmaPolicy = MmaPolicy<
-    MmaWarpSimt,
-    MatrixShape<kPaddingN, 0>,    // skew for A matrix to avoid SMEM bank conflicts
-    MatrixShape<0, kPaddingN>,    // skew for B matrix to avoid SMEM bank conflicts
-    WarpCount::kK
-  >;
-};
+//   // these should have max of thread tile also
+//   using LaneMmaShape = cutlass::gemm::GemmShape<
+//       LaneM,
+//       LaneN,
+//       1>;
+//   using Policy = cutlass::gemm::warp::MmaSimtPolicy<
+//       cutlass::MatrixShape<WarpNumThreadsM, WarpNumThreadsN>,   // WarpShape
+//       cutlass::layout::RowMajorInterleaved<LaneLayout>,         // LaneLayout
+//       LaneMmaShape
+//   >;
+
+//   using MmaWarpSimt = cutlass::gemm::warp::ConvMmaSimt<
+//       WarpShape,      /// Size of the Gemm problem - concept: gemm::GemmShape<> 128, 128, 8
+//       ElementA,       /// Data type of A elements
+//       SmemLayoutA,    /// Layout of A matrix (concept: MatrixLayout)
+//       ElementB,       /// Data type of B elements
+//       SmemLayoutB,    /// Layout of B matrix (concept: MatrixLayout)
+//       ElementC,       /// Element type of C matrix
+//       LayoutC,        /// Layout of C matrix (concept: MatrixLayout)
+//       Policy          /// Policy describing warp-level MmaSimtOp (concept: MmaSimtOp policy)
+//   >;
+
+//   /// Policy used to define MmaPipelined
+//   using MmaPolicy = MmaPolicy<
+//     MmaWarpSimt,
+//     MatrixShape<kPaddingN, 0>,    // skew for A matrix to avoid SMEM bank conflicts
+//     MatrixShape<0, kPaddingN>,    // skew for B matrix to avoid SMEM bank conflicts
+//     WarpCount::kK
+//   >;
+// };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -495,6 +495,9 @@ struct DefaultConvMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
   //     printf("DefaultConvMmaCore: layout::PitchLinearShape<Shape::kK, Shape::kM> %d %d, kThreads: %d kElementsPerAccess: %d\n",Shape::kK, Shape::kM, kThreads, kElementsPerAccess);
   // }
 
+
+  // (klecki) We need to adjust those to replicate the window operand most probably
+  // the SMEM iterators are used for storage!!
   /// Transpose the ThreadMap of iterator A
   using SmemThreadMapA = transform::TransposePitchLinearThreadMapSimt<IteratorThreadMapA>;
 
@@ -513,15 +516,27 @@ struct DefaultConvMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
     kThreads,
     kElementsPerAccess
   >;
+  // using IteratorThreadMapB = transform::PitchLinearStripminedThreadMap<
+  //   layout::PitchLinearShape<Shape::kN, 1>,
+  //   kThreads,
+  //   kElementsPerAccess
+  // >;
 
   /// Shared memory iterator to B operand
   using SmemIteratorB = transform::threadblock::RegularTileIterator<
-    MatrixShape<Shape::kK, Shape::kN>,
+    MatrixShape<Shape::kK, Shape::kN>, // 8, 128 (klecki) -> 1 row, of length 128
     ElementB,
-    SmemLayoutB,
-    0,
+    SmemLayoutB, // RowMajor
+    0,  // AdvanceRank -> row?
     IteratorThreadMapB
   >;
+  // using SmemIteratorB = transform::threadblock::RegularTileIterator<
+  //   MatrixShape<1, Shape::kN>, // 8, 128 (klecki) -> 1 row, of length 128
+  //   ElementB,
+  //   SmemLayoutB, // RowMajor
+  //   0,  // AdvanceRank -> row?
+  //   IteratorThreadMapB
+  // >;
 
   //
   // Warp-level matrix multiply operator
@@ -547,14 +562,20 @@ struct DefaultConvMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
       LaneM,
       LaneN,
       1>;
+
+
+  // (klecki): here is the warp loading policy -> we need the GMEM -> SMEM to load a row
+  // and than unpack it here (I GUESS)
   using Policy = cutlass::gemm::warp::MmaSimtPolicy<
       cutlass::MatrixShape<WarpNumThreadsM, WarpNumThreadsN>,   // WarpShape
       cutlass::layout::RowMajorInterleaved<LaneLayout>,         // LaneLayout
       LaneMmaShape
   >;
 
-  using MmaWarpSimt = cutlass::gemm::warp::MmaSimt<
-      WarpShape,    /// Size of the Gemm problem - concept: gemm::GemmShape<> 128, 128, 8
+  // (klecki): we don't want to change those iterators as of now, let them be used
+  // actually, we need to implement replication in the ConvMmaSimt!
+  using MmaWarpSimt = cutlass::gemm::warp::ConvMmaSimt<
+      WarpShape,    /// Size of the Gemm problem - concept: gemm::GemmShape<> 32, 64, 8 (klecki)
       ElementA,     /// Data type of A elements
       SmemLayoutA,  /// Layout of A matrix (concept: MatrixLayout)
       ElementB,     /// Data type of B elements
@@ -563,7 +584,6 @@ struct DefaultConvMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
       LayoutC,      /// Layout of C matrix (concept: MatrixLayout)
       Policy        /// Policy describing warp-level MmaSimtOp (concept: MmaSimtOp policy)
   >;
-
   /// Policy used to define MmaPipelined
   using MmaPolicy = MmaPolicy<
     MmaWarpSimt,
@@ -719,7 +739,7 @@ struct DefaultConvMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
 //       LaneMmaShape
 //   >;
 
-//   using MmaWarpSimt = cutlass::gemm::warp::MmaSimt<
+//   using MmaWarpSimt = cutlass::gemm::warp::ConvMmaSimt<
 //       WarpShape,    /// Size of the Gemm problem - concept: gemm::GemmShape<> 128, 128, 8
 //       ElementA,     /// Data type of A elements
 //       SmemLayoutA,  /// Layout of A matrix (concept: MatrixLayout)
@@ -872,7 +892,7 @@ struct DefaultConvMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
 //       LaneMmaShape
 //   >;
 
-//   using MmaWarpSimt = cutlass::gemm::warp::MmaSimt<
+//   using MmaWarpSimt = cutlass::gemm::warp::ConvMmaSimt<
 //     WarpShape,    /// Size of the Gemm problem - concept: gemm::GemmShape<> 128, 128, 8
 //     ElementA,     /// Data type of A elements
 //     SmemLayoutA,  /// Layout of A matrix (concept: MatrixLayout)
@@ -1032,7 +1052,7 @@ struct DefaultConvMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
 //       LaneMmaShape
 //   >;
 
-//   using MmaWarpSimt = cutlass::gemm::warp::MmaSimt<
+//   using MmaWarpSimt = cutlass::gemm::warp::ConvMmaSimt<
 //     WarpShape,    /// Size of the Gemm problem - concept: gemm::GemmShape<> 128, 128, 8
 //     ElementA,     /// Data type of A elements
 //     SmemLayoutA,  /// Layout of A matrix (concept: MatrixLayout)
@@ -1191,7 +1211,7 @@ struct DefaultConvMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
 //       LaneMmaShape
 //   >;
 
-//   using MmaWarpSimt = cutlass::gemm::warp::MmaSimt<
+//   using MmaWarpSimt = cutlass::gemm::warp::ConvMmaSimt<
 //     WarpShape,    /// Size of the Gemm problem - concept: gemm::GemmShape<> 128, 128, 8
 //     ElementA,     /// Data type of A elements
 //     SmemLayoutA,  /// Layout of A matrix (concept: MatrixLayout)
@@ -1351,7 +1371,7 @@ struct DefaultConvMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
 //       LaneMmaShape
 //   >;
 
-//   using MmaWarpSimt = cutlass::gemm::warp::MmaSimt<
+//   using MmaWarpSimt = cutlass::gemm::warp::ConvMmaSimt<
 //     WarpShape,    /// Size of the Gemm problem - concept: gemm::GemmShape<> 128, 128, 8
 //     ElementA,     /// Data type of A elements
 //     SmemLayoutA,  /// Layout of A matrix (concept: MatrixLayout)
