@@ -177,16 +177,15 @@ __global__ void InitializeMatrix_kernel(
     int offset = row * ldm + col;
 
     // Generate arbitrary elements.
-    // int const k = 16807;
-    // int const m = 16;
-    // T value = T(((offset + seed) * k % m) - m / 2); // TODO modulo something
-    T value = 1000000 + row * 1000 + col;
+    int const k = 16807;
+    int const m = 16;
+    T value = T(((offset + seed) * k % m) - m / 2); // TODO modulo something
+    // T value = row * 100 + col;
 
     matrix[offset] = value;
   }
 }
 
-// the "B" matrix basically
 template <typename T>
 __global__ void InitializeMatrix_kernel_col_invariant(
   T *matrix,
@@ -202,14 +201,41 @@ __global__ void InitializeMatrix_kernel_col_invariant(
     int offset = row * ldm + col;
 
     // Generate arbitrary elements.
-    // int const k = 16807;
-    // int const m = 16;
-    // T value = T(((row + seed) * k % m) - m / 2); // TODO modulo something
-    T value = row * 1000 + col;
+    int const k = 16807;
+    int const m = 16;
+    T value = T(((col + seed) * k % m) - m / 2); // TODO modulo something
+    // initialize with the col-repeat scheme
+    // T value = col;
 
     matrix[offset] = value;
   }
 }
+
+
+// // the "B" matrix basically
+// template <typename T>
+// __global__ void InitializeMatrix_kernel_col_invariant(
+//   T *matrix,
+//   int ldm,
+//   int rows,
+//   int columns,
+//   int seed = 0) {
+
+//   int row = threadIdx.x + blockIdx.x * blockDim.x;
+//   int col = threadIdx.y + blockIdx.y * blockDim.y;
+
+//   if (row < rows && col < columns) {
+//     int offset = row * ldm + col;
+
+//     // Generate arbitrary elements.
+//     // int const k = 16807;
+//     // int const m = 16;
+//     // T value = T(((row + seed) * k % m) - m / 2); // TODO modulo something
+//     T value =  col;
+
+//     matrix[offset] = value;
+//   }
+// }
 
 /// Simple function to initialize a matrix to arbitrary small integers.
 template <typename T>
@@ -246,7 +272,7 @@ template <typename T>
 cudaError_t AllocateMatrix(T **matrix, int ldm, int rows, int columns, int seed = 0, bool col_invariant = false) {
   cudaError_t result;
 
-  size_t sizeof_matrix = sizeof(T) * ldm * columns;
+  size_t sizeof_matrix = sizeof(T) * ldm * rows;
 
   // Allocate device memory.
   result = cudaMalloc(reinterpret_cast<void **>(matrix), sizeof_matrix);
@@ -352,12 +378,12 @@ cudaError_t TestCutlassGemm(int M, int N, int K, A_type alpha, C_type beta) {
   //
 
   // Compute leading dimensions for each matrix.
-  int lda = M;
-  int ldb = K;
-  int ldc = M;
+  int lda = K;
+  int ldb = N;
+  int ldc = N;
 
   // Compute size in bytes of the C matrix.
-  size_t sizeof_C = sizeof(C_type) * ldc * N;
+  size_t sizeof_C = sizeof(C_type) * ldc * M;
 
   // Define pointers to matrices in GPU device memory.
   A_type *A;
@@ -451,8 +477,8 @@ cudaError_t TestCutlassGemm(int M, int N, int K, A_type alpha, C_type beta) {
   }
 
   // Copy to host and verify equivalence.
-  std::vector<C_type> host_cutlass(ldc * N, 0);
-  std::vector<C_type> host_reference(ldc * N, 0);
+  std::vector<C_type> host_cutlass(ldc * M, 0);
+  std::vector<C_type> host_reference(ldc * M, 0);
 
   result = cudaMemcpy(host_cutlass.data(), C_cutlass, sizeof_C, cudaMemcpyDeviceToHost);
 
@@ -497,6 +523,14 @@ cudaError_t TestCutlassGemm(int M, int N, int K, A_type alpha, C_type beta) {
 
   dbg(host_reference);
   dbg(host_cutlass);
+  for (int row = 0; row < M; row++) {
+    for (int col = 0; col < N; col++) {
+      if (host_cutlass[row * ldc + col] != host_reference[row * ldc + col]) {
+        std::cerr << "CUTLASS results incorrect: (" << row << ", " << col << "): "
+          << host_cutlass[row * ldc + col] << " != " << host_reference[row * ldc + col] << std::endl;
+      }
+    }
+  }
   if (host_cutlass != host_reference) {
     std::cerr << "CUTLASS results incorrect." << std::endl;
 

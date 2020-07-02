@@ -721,7 +721,7 @@ template <
 >
 class ConvMmaSimtTileIterator<Shape_, Operand::kB, Element_, layout::RowMajor, Policy_, PartitionsK, PartitionGroupSize> {
 public:
-
+  int row, col;
   /// Shape of tile to load (concept: MatrixShape)
   using Shape = Shape_;
 
@@ -748,6 +748,8 @@ public:
 
   /// Coordinate for an element in the tensor
   using TensorCoord = typename TensorRef::TensorCoord;
+
+  static const int kActualRows = 0; /// we're fixed to row 0
 
   //
   // Derived quantities
@@ -799,7 +801,7 @@ public:
   CUTLASS_HOST_DEVICE
   ConvMmaSimtTileIterator(
     TensorRef ref,
-    int lane_id
+    int lane_id, int global_row, int global_col
   ) {
     PRINT_IF
       printf("ConvMmaSimtTileIterator(,)\n");
@@ -811,6 +813,8 @@ public:
       MatrixCoord(0, Policy::LaneMmaShape::kN);
     PRINT_IF
       printf("Offset: %d %d\n", lane_offset[0], lane_offset[1]);
+    row = global_row + lane_offset[0];
+    col = global_col + lane_offset[1];
 
     ref.add_coord_offset(lane_offset);
 
@@ -831,11 +835,13 @@ public:
   /// Advances an iterator along logical dimensions of matrix in units of whole tiles
   CUTLASS_HOST_DEVICE
   ConvMmaSimtTileIterator &add_tile_offset(TensorCoord const &coord) {
+    row += coord.row();
+    col += coord.column();
     PRINT_IF
       printf("ConvMmaSimtTileIterator::add_tile_offset: %d %d\n", coord.row(), coord.column());
 
     ref_.add_coord_offset({
-      coord.row() * Shape::kRow,
+      kActualRows,
       coord.column() * Shape::kColumn / Policy::LaneMmaShape::kN});
 
     return *this;
@@ -844,10 +850,11 @@ public:
   /// Advances the iterator along the advance dimension
   CUTLASS_HOST_DEVICE
   ConvMmaSimtTileIterator & operator++() {
+    row += Shape::kRow;
     PRINT_IF
       printf("ConvMmaSimtTileIterator++: %d %d\n", Shape::kRow, 0);
 
-    ref_.add_coord_offset({Shape::kRow, 0});
+    ref_.add_coord_offset({kActualRows, 0});
 
     return *this;
   }
@@ -855,10 +862,11 @@ public:
   /// Advances the iterator along the advance dimension
   CUTLASS_HOST_DEVICE
   ConvMmaSimtTileIterator & operator--() {
+    row -= Shape::kRow;
     PRINT_IF
       printf("ConvMmaSimtTileIterator--: %d %d\n", -Shape::kRow, 0);
 
-    ref_.add_coord_offset({-Shape::kRow, 0});
+    ref_.add_coord_offset({-kActualRows, 0});
 
     return *this;
   }
@@ -866,6 +874,8 @@ public:
   /// Loads a fragment from memory at the location pointed to by the iterator.
   CUTLASS_HOST_DEVICE
   void load_with_pointer_offset(Fragment &frag, Index pointer_offset) const {
+    PRINT_IF
+      printf("FRAG LOAD from (%d, %d)\n", row, col);
 
     Array<Element, Policy::LaneMmaShape::kN> *dst_ptr =
       reinterpret_cast<Array<Element, Policy::LaneMmaShape::kN> *>(&frag);
@@ -876,7 +886,7 @@ public:
       for (int n = 0; n < Iterations::kColumn; ++n) {
         dst_ptr[n + k * Iterations::kColumn] =
           // TODO(klecki): load the same row over and over again
-          *(ref_.data() + ref_.offset({0, n * Policy::WarpShape::kColumn}) + pointer_offset / Policy::LaneMmaShape::kN);
+          *(ref_.data() + ref_.offset({kActualRows, n * Policy::WarpShape::kColumn}) + pointer_offset / Policy::LaneMmaShape::kN);
       }
     }
   }
@@ -887,28 +897,28 @@ public:
     load_with_pointer_offset(frag, 0);
   }
 
-  /// Stores a fragment to memory at the location pointed to by the iterator
-  CUTLASS_HOST_DEVICE
-  void store_with_pointer_offset(Fragment const &frag, Index pointer_offset) const {
+  // /// Stores a fragment to memory at the location pointed to by the iterator
+  // CUTLASS_HOST_DEVICE
+  // void store_with_pointer_offset(Fragment const &frag, Index pointer_offset) const {
+  //   printf("DO WE EVEN STORE?");
+  //   Array<Element, Policy::LaneMmaShape::kN> const *src_ptr =
+  //     reinterpret_cast<Array<Element, Policy::LaneMmaShape::kN> *>(&frag);
 
-    Array<Element, Policy::LaneMmaShape::kN> const *src_ptr =
-      reinterpret_cast<Array<Element, Policy::LaneMmaShape::kN> *>(&frag);
+  //   CUTLASS_PRAGMA_UNROLL
+  //   for (int k = 0; k < Iterations::kM; ++k) {
+  //     CUTLASS_PRAGMA_UNROLL
+  //     for (int n = 0; n < Iterations::kN; ++n) {
+  //       *(ref_.data() + ref_.offset({k, n * Policy::WarpShape::kN}) + pointer_offset / Policy::LaneMmaShape::kN) =
+  //         src_ptr[n + k * Iterations::kN];
+  //     }
+  //   }
+  // }
 
-    CUTLASS_PRAGMA_UNROLL
-    for (int k = 0; k < Iterations::kM; ++k) {
-      CUTLASS_PRAGMA_UNROLL
-      for (int n = 0; n < Iterations::kN; ++n) {
-        *(ref_.data() + ref_.offset({k, n * Policy::WarpShape::kN}) + pointer_offset / Policy::LaneMmaShape::kN) =
-          src_ptr[n + k * Iterations::kN];
-      }
-    }
-  }
-
-  /// Stores a fragment to memory at the location pointed to by the iterator
-  CUTLASS_HOST_DEVICE
-  void store(Fragment const &frag, Index pointer_offset) const {
-    store_with_pointer_offset(frag, 0);
-  }
+  // /// Stores a fragment to memory at the location pointed to by the iterator
+  // CUTLASS_HOST_DEVICE
+  // void store(Fragment const &frag, Index pointer_offset) const {
+  //   store_with_pointer_offset(frag, 0);
+  // }
 
   /// Notify the iterator which k-group it is currently pointing to.
   ///

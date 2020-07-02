@@ -212,7 +212,8 @@ public:
     // The last kblock is loaded in the prolog
     iterator_A.load(tb_frag_A);
     iterator_B.load(tb_frag_B);
-    __syncthreads();
+    // iterator_A.
+    // __syncthreads();
 
     // int x__ = Debugx<FragmentB>::template f();
     // printf("%d", x__);
@@ -229,7 +230,7 @@ public:
     // debug::dump_fragment(tb_frag_B, 4);
     // return;
 
-    __syncthreads();
+    // __syncthreads();
 
     ++iterator_A;
     ++iterator_B;
