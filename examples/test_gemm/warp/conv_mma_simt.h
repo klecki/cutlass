@@ -170,7 +170,8 @@ public:
 
   // (klecki): Here do the duplication!
   /// Iterates over the B operand in memory
-  using IteratorB = MmaSimtTileIterator<
+  // Debug<LayoutB>::LayoutB x;
+  using IteratorB = ConvMmaSimtTileIterator<
     MatrixShape<Policy::LaneMmaShape::kK, Shape::kN>,
     Operand::kB,
     ElementB,
