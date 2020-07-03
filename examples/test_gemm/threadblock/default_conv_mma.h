@@ -35,6 +35,7 @@
 
 #include "cutlass/layout/matrix.h"
 #include "cutlass/transform/threadblock/predicated_tile_iterator.h"
+#include "threadblock/position_predicated_tile_iterator.h"
 #include "cutlass/transform/threadblock/predicated_tile_iterator_2dthreadtile.h"
 // #include "cutlass/gemm/threadblock/default_mma_core_sm70.h"
 // #include "cutlass/gemm/threadblock/default_mma_core_sm75.h"
@@ -139,7 +140,7 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 
   // Define iterators over tiles from the B operand
   using IteratorB =
-      cutlass::transform::threadblock::PredicatedTileIterator<
+      cutlass::transform::threadblock::PositionPredicatedTileIterator<
           cutlass::MatrixShape<MmaCore::Shape::kK, MmaCore::Shape::kN>,
           ElementB, LayoutB, 0, typename MmaCore::IteratorThreadMapB, kAlignmentB>;
 

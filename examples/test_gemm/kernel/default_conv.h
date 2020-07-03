@@ -59,6 +59,7 @@
 #include "cutlass/epilogue/threadblock/default_epilogue_volta_tensor_op.h"
 #include "cutlass/epilogue/threadblock/default_epilogue_simt.h"
 #include "cutlass/transform/threadblock/predicated_tile_iterator.h"
+#include "threadblock/position_predicated_tile_iterator.h"
 
 #if defined(CUTLASS_ARCH_WMMA_ENABLED)
 #include "cutlass/epilogue/threadblock/default_epilogue_wmma_tensor_op.h"
