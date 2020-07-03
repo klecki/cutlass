@@ -176,7 +176,7 @@ struct Conv {
   void operator()(Params const &params, SharedStorage &shared_storage) {
 
     // Compute threadblock location
-    ThreadblockSwizzle threadblock_swizzle; // todo: klecki: build TB swizzle for out of bounds accesses
+    ThreadblockSwizzle threadblock_swizzle; // todo(klecki): build TB swizzle for out of bounds accesses
 
     cutlass::gemm::GemmCoord threadblock_tile_offset = threadblock_swizzle.get_tile_offset();
     // todo(klecki): here we know the actual tile!!! (global tile)

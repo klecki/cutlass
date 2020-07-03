@@ -94,7 +94,7 @@ struct PitchLinearStripminedThreadMap {
     );
   };
 
-  /// Number of iterations by each thread
+  /// (klecki) Number of iterations by each thread
   // THIS GIVES US THE 4, from Continuous * Strided
   using Iterations = typename platform::conditional<
     Threads >= Detail::ShapeVec::kContiguous,

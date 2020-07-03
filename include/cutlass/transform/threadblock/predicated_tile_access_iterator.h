@@ -79,11 +79,14 @@ class PredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear,
       "Specialization for pitch-linear iterator may along advance along the "
       "contiguous(rank=0) or strided(rank=1) dimension.");
 
-  using Shape = Shape_;
+  using Shape = Shape_; // (klecki): for A it's PitchLinearShape<K, M>, reduced it's 8, 32, advance rank 0
+  // (klecki) for B it's PitchLinearShape<32, 8>, advance rank 1
   using Element = Element_;
   using Layout = layout::PitchLinear;
   static int const kAdvanceRank = AdvanceRank;
   using ThreadMap = ThreadMap_;
+  // Debug<typename ThreadMap::Delta>::ThreadMap x; // Delta for A is <1, 16> as we have 128 threads to cover <8, 32> elements
+  // Debug<typename ThreadMap::Iterations>::ThreadMap x; // Iterations for A is <1, 2> as we have 128 threads to cover <8, 32> elements??
   using AccessType = AccessType_;
 
   using Index = typename Layout::Index;
@@ -234,6 +237,8 @@ class PredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear,
                                 s * ThreadMap::Delta::kStrided);
 
       TensorCoord coord = thread_offset_ + iteration_coord;
+      PRINT_IF
+        printf("PTAI: coord: %d %d; the shape <%d, %d>\n", coord.contiguous(), coord.strided(), Shape::kContiguous, Shape::kStrided);
 
       bool guard;
 
