@@ -144,16 +144,16 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
           cutlass::MatrixShape<MmaCore::Shape::kK, MmaCore::Shape::kN>,
           ElementB, LayoutB, 0, typename MmaCore::IteratorThreadMapB, kAlignmentB>;
 
-  using TileShapeB = cutlass::layout::PitchLinearShape<MmaCore::Shape::kK, 1>; // we only load one row of window - hmm, it's bad that it's the other way round
-  using TileLayoutB = cutlass::layout::PitchLinear;
+//   using TileShapeB = cutlass::layout::PitchLinearShape<MmaCore::Shape::kK, 1>; // we only load one row of window - hmm, it's bad that it's the other way round
+//   using TileLayoutB = cutlass::layout::PitchLinear;
 
-  // in  DefaultConvMmaCore
-    /// Policy of iterator B
-  using IteratorThreadMapB = transform::PitchLinearStripminedThreadMap<
-    TileShapeB,
-    kThreads,
-    kElementsPerAccess
-  >;
+//   // in  DefaultConvMmaCore
+//     /// Policy of iterator B
+//   using IteratorThreadMapB = transform::PitchLinearStripminedThreadMap<
+//     TileShapeB,
+//     kThreads,
+//     kElementsPerAccess
+//   >;
 
 
   // ThreadMaps define how threads are mapped to a given tile. The PitchLinearStripminedThreadMap

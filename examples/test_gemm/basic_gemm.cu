@@ -177,12 +177,17 @@ __global__ void InitializeMatrix_kernel(
     int offset = row * ldm + col;
 
     // Generate arbitrary elements.
-    int const k = 16807;
-    int const m = 16;
-    T value = T(((offset + seed) * k % m) - m / 2); // TODO modulo something
+    // int const k = 16807;
+    // int const m = 16;
+    // T value = T(((offset + seed) * k % m) - m / 2); // TODO modulo something
     // T value = row * 100 + col;
 
+    T value = 0;
+    if (row == col)
+      value = 1;
+
     matrix[offset] = value;
+
   }
 }
 
@@ -201,9 +206,20 @@ __global__ void InitializeMatrix_kernel_col_invariant(
     int offset = row * ldm + col;
 
     // Generate arbitrary elements.
-    int const k = 16807;
-    int const m = 16;
-    T value = T(((col + seed) * k % m) - m / 2); // TODO modulo something
+    // int const k = 16807;
+    // int const m = 16;
+    // T value = T(((col + seed) * k % m) - m / 2); // TODO modulo something
+    int diag_dist = row - col;
+    T value = 0;
+    int window_size = 17;
+    int radius = window_size / 2;
+    if (diag_dist == 0) {
+      value = 100;
+    }
+    else if (::abs(diag_dist) <= radius) {
+      value = radius - abs(diag_dist);
+    }
+
     // initialize with the col-repeat scheme
     // T value = col;
 
@@ -368,6 +384,23 @@ cudaError_t ReferenceGemm(
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+
+template <typename T>
+void print_mat(int rows, int cols, const std::vector<T> &mat, int max_rows = -1, int max_cols = -1) {
+  if (max_rows == -1)
+    max_rows = rows;
+  if (max_cols == -1)
+    max_cols = cols;
+  for (int r = 0; r < max_rows; r++) {
+    std::cout << "{";
+    for (int c = 0; c < max_cols; c++) {
+      std::cout << mat[r * cols + c] << ", ";
+    }
+    std::cout << "}\n";
+  }
+  std::cout << std::endl;
+}
+
 /// Allocate several matrices in GPU device memory and call a single-precision
 /// CUTLASS GEMM kernel.
 cudaError_t TestCutlassGemm(int M, int N, int K, A_type alpha, C_type beta) {
@@ -383,6 +416,8 @@ cudaError_t TestCutlassGemm(int M, int N, int K, A_type alpha, C_type beta) {
   int ldc = N;
 
   // Compute size in bytes of the C matrix.
+  size_t sizeof_A = sizeof(A_type) * lda * M;
+  size_t sizeof_B = sizeof(B_type) * ldb * K;
   size_t sizeof_C = sizeof(C_type) * ldc * M;
 
   // Define pointers to matrices in GPU device memory.
@@ -477,9 +512,13 @@ cudaError_t TestCutlassGemm(int M, int N, int K, A_type alpha, C_type beta) {
   }
 
   // Copy to host and verify equivalence.
+  std::vector<A_type> host_a(lda * M, 0);
+  std::vector<B_type> host_b(ldb * K, 0);
   std::vector<C_type> host_cutlass(ldc * M, 0);
   std::vector<C_type> host_reference(ldc * M, 0);
 
+  result = cudaMemcpy(host_a.data(), A, sizeof_A, cudaMemcpyDeviceToHost);
+  result = cudaMemcpy(host_b.data(), B, sizeof_B, cudaMemcpyDeviceToHost);
   result = cudaMemcpy(host_cutlass.data(), C_cutlass, sizeof_C, cudaMemcpyDeviceToHost);
 
   if (result != cudaSuccess) {
@@ -523,14 +562,24 @@ cudaError_t TestCutlassGemm(int M, int N, int K, A_type alpha, C_type beta) {
 
   dbg(host_reference);
   dbg(host_cutlass);
-  for (int row = 0; row < M; row++) {
-    for (int col = 0; col < N; col++) {
-      if (host_cutlass[row * ldc + col] != host_reference[row * ldc + col]) {
-        std::cerr << "CUTLASS results incorrect: (" << row << ", " << col << "): "
-          << host_cutlass[row * ldc + col] << " != " << host_reference[row * ldc + col] << std::endl;
-      }
-    }
-  }
+  std::cout << "CUTLASS A" << std::endl;
+  print_mat(M, K, host_a);
+  std::cout << "CUTLASS B" << std::endl;
+  print_mat(K, N, host_b);
+
+  // std::cout << "CUTLASS reference" << std::endl;
+  // print_mat(M, N, host_reference);
+
+  std::cout << "CUTLASS C" << std::endl;
+  print_mat(M, N, host_cutlass, M, N);
+  // for (int row = 0; row < M; row++) {
+  //   for (int col = 0; col < N; col++) {
+  //     if (host_cutlass[row * ldc + col] != host_reference[row * ldc + col]) {
+  //       std::cerr << "CUTLASS results incorrect: (" << row << ", " << col << "): "
+  //         << host_cutlass[row * ldc + col] << " != " << host_reference[row * ldc + col] << std::endl;
+  //     }
+  //   }
+  // }
   if (host_cutlass != host_reference) {
     std::cerr << "CUTLASS results incorrect." << std::endl;
 

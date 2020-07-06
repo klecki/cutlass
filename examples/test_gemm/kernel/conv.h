@@ -233,10 +233,34 @@ struct Conv {
       thread_idx,
       tb_offset_A);
 
+
+    // Construct the windows:
+    // TensorRef
+    auto window = shared_storage.main_loop.operand_Window_ref();
+
+    // TODO(klecki):
+    // eithere compute the window directly in SMEM or get it from GMEM
+    int window_size = 17;
+    int radius = window_size / 2;
+    for (int i = thread_idx; i < window_size; i++) {
+      if (i < radius) {
+        window.data()[i] = i;
+      } else if (i > radius) {
+        window.data()[i] = window_size - 1 - i;
+      } else {
+        window.data()[i] = 100;
+      }
+    }
+    // PRINT_IF
+    //   for (int i = 0; i < 256; i++) {
+    //     printf("window %d: %f\n", i, window.data()[i]);
+    //   }
+
+
     typename Mma::IteratorB iterator_B(
       params.params_B,
-      params.ref_B.data(),
-      {problem_size_k, params.problem_size.n()},
+      window.data(),
+      {problem_size_k, params.problem_size.n()}, // TODO(klecki) sizes etc are dummy
       thread_idx,
       tb_offset_B);
 
@@ -251,6 +275,8 @@ struct Conv {
 
     // Construct thread-scoped matrix multiply
     Mma mma(shared_storage.main_loop, thread_idx, warp_idx, lane_idx);
+
+
 
     typename Mma::FragmentC accumulators;
 

@@ -120,6 +120,12 @@ class ConvMmaBase {
   /// Tensor reference to the B operand
   using TensorRefB = TensorRef<typename Operator::ElementB, typename Operator::LayoutB>;
 
+  /// Tensor reference to the B operand
+  using TensorRefWindow = TensorRef<typename Operator::ElementB, layout::RowMajor>;
+
+  static int const kWindowLength = 256; // (todo): klecki some sensible max window size
+  // maybe do kWindowLength = kFactor * Shape::kK; so we have some control over that?
+
   //
   // Nested structs
   //
@@ -145,6 +151,11 @@ class ConvMmaBase {
     //     MatrixShape<1 * kStages + Policy::SmemPaddingB::kRow,
     //                 Shape::kN + Policy::SmemPaddingB::kColumn>;
 
+
+    // todo(klecki): we just put a "vector" here?
+    // now do it as row matrix:
+    // we keep the window as K dimension, in fact it's kinda independent kOnstant
+    using ShapeWindow = MatrixShape<1, kWindowLength>;
    public:
     //
     // Data members
@@ -155,6 +166,9 @@ class ConvMmaBase {
 
     /// Buffer for B operand
     AlignedBuffer<typename Operator::ElementB, ShapeB::kCount> operand_B;
+
+    // Buffer for Convolution Window
+    AlignedBuffer<typename Operator::ElementB, ShapeWindow::kCount> operand_Window;
 
    public:
 
@@ -185,6 +199,21 @@ class ConvMmaBase {
     TensorRefB operand_B_ref() {
       return TensorRefB{operand_B.data(), LayoutB()};
     }
+
+    /// Returns a layout object for the convolution window
+    CUTLASS_HOST_DEVICE
+    static typename layout::RowMajor LayoutWindow() {
+      return layout::RowMajor::packed({1, kWindowLength});
+    }
+
+    /// Returns a TensorRef to the convolution window
+    CUTLASS_HOST_DEVICE
+    TensorRefWindow operand_Window_ref() {
+      return TensorRefWindow{operand_Window.data(), LayoutWindow()};
+    }
+
+
+
   };
 
  protected:

@@ -23,7 +23,7 @@
  *
  **************************************************************************************************/
 /*! \file
-    \brief Templates implementing loading of tiles from pitch-linear rank=2 tensors. 
+    \brief Templates implementing loading of tiles from pitch-linear rank=2 tensors.
 
     This iterator uses masks to guard out-of-bounds accesses and visits the last "residue" tile
     first, with the objective of minimizing predicate mask updates during steady-state operation.
@@ -75,7 +75,7 @@ public:
 
   using Fragment = Array<Element, ThreadMap::Iterations::kCount * ThreadMap::kElementsPerAccess>;
 
-  static_assert(kAdvanceRank == 0 || kAdvanceRank == 1, 
+  static_assert(kAdvanceRank == 0 || kAdvanceRank == 1,
     "Advance rank may only be along the contiguous or strided dimensions.");
 
 private:
@@ -83,7 +83,7 @@ private:
   //
   // Types
   //
-  
+
   using AccessType = AlignedArray<Element, ThreadMap::kElementsPerAccess, kAlignment>;
 
   //
@@ -109,23 +109,25 @@ public:
 
   CUTLASS_DEVICE
   RegularTileIterator(
-    TensorRef const &ref, 
+    TensorRef const &ref,
     int thread_idx
-  ): 
+  ):
     pointer_(reinterpret_cast<uint8_t *>(ref.data()) + (ref.offset(ThreadMap::initial_offset(thread_idx)) * sizeof_bits<Element>::value / 8)) {
-    
+
     stride_ = ref.stride()[0];
     increment_strided_ = (ref.stride()[0] * sizeof_bits<Element>::value) * ThreadMap::Delta::kStrided / 8;
-    
-    increment_advance_ = 
-      (kAdvanceRank == 0 ? 
-        Shape::kContiguous * sizeof_bits<Element>::value / 8 : 
+
+    increment_advance_ =
+      (kAdvanceRank == 0 ?
+        Shape::kContiguous * sizeof_bits<Element>::value / 8 :
         Shape::kStrided * (ref.stride()[0] * sizeof_bits<Element>::value / 8));
   }
 
   /// Loads a fragment
   CUTLASS_DEVICE
   void load_with_pointer_offset(Fragment &frag, Index pointer_offset) {
+    PRINT_IF
+      printf("NAH, load is not used\n");
 
     AccessType *frag_ptr = reinterpret_cast<AccessType *>(&frag);
     uint8_t const *byte_pointer = pointer_ + pointer_offset * sizeof_bits<Element>::value / 8;
@@ -152,8 +154,8 @@ public:
   CUTLASS_HOST_DEVICE
   void load(Fragment &frag, TensorCoord const & tile_offset) {
     load_with_pointer_offset(
-      frag, 
-      tile_offset.contiguous() * Shape::kContiguous / ThreadMap::kElementsPerAccess + 
+      frag,
+      tile_offset.contiguous() * Shape::kContiguous / ThreadMap::kElementsPerAccess +
         tile_offset.strided() * Shape::kStrided * stride_
     );
   }
@@ -167,6 +169,9 @@ public:
   /// Stores a fragment
   CUTLASS_HOST_DEVICE
   void store_with_pointer_offset(Fragment const &frag, Index pointer_offset) {
+    // debug::dump_fragment(frag);
+    PRINT_IF
+    printf("YUP, store is used\n");
 
     AccessType const *frag_ptr = reinterpret_cast<AccessType const*>(&frag);
     uint8_t *byte_pointer = pointer_ + pointer_offset * sizeof_bits<Element>::value / 8;
@@ -271,7 +276,7 @@ public:
     kAlignment
   >;
 
-  static_assert(kAdvanceRank == 0 || kAdvanceRank == 1, 
+  static_assert(kAdvanceRank == 0 || kAdvanceRank == 1,
     "Advance rank may only be along the row or column dimensions.");
 
 private:
@@ -285,7 +290,7 @@ public:
 
   CUTLASS_DEVICE
   RegularTileIterator(
-    TensorRef const &ref, 
+    TensorRef const &ref,
     int thread_idx
   ):
     iterator_({ref.data(), ref.stride()}, thread_idx) {
@@ -392,7 +397,7 @@ public:
     ThreadMap
   >;
 
-  static_assert(kAdvanceRank == 0 || kAdvanceRank == 1, 
+  static_assert(kAdvanceRank == 0 || kAdvanceRank == 1,
     "Advance rank may only be along the row or column dimensions.");
 
 private:
@@ -406,7 +411,7 @@ public:
 
   CUTLASS_DEVICE
   RegularTileIterator(
-    TensorRef const &ref, 
+    TensorRef const &ref,
     int thread_idx
   ):
     iterator_({ref.data(), ref.stride()}, thread_idx) {

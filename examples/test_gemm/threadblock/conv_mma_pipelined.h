@@ -164,6 +164,21 @@ public:
     smem_iterator_A_(shared_storage.operand_A_ref(), thread_idx),
     smem_iterator_B_(shared_storage.operand_B_ref(), thread_idx) {
 
+    // TODO(klecki): load here using the GMEM iterator?
+
+    // TODO look at the example 4?
+    // using TileShapeB = cutlass::layout::PitchLinearShape<MmaCore::Shape::kK, 1>;
+    // using IteratorThreadMapWindow = transform::PitchLinearStripminedThreadMap<
+    //     TileShapeB,
+    //     kThreads,
+    //     kElementsPerAccess
+    //   >;
+
+    // using IteratorWindow =
+    //   cutlass::transform::threadblock::PositionPredicatedTileIterator<
+    //       cutlass::MatrixShape<1, kWindowShape>,
+    //       ElementB, layout::RowMajor, 0, typename MmaCore::IteratorThreadMapB, kAlignmentB>;
+
     // Compute warp location within threadblock tile by mapping the warp_id to
     // three coordinates:
     //   _m: the warp's position within the threadblock along the M dimension

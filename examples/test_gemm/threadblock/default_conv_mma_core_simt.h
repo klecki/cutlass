@@ -572,9 +572,10 @@ struct DefaultConvMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
       LaneMmaShape
   >;
 
-  // (klecki): we don't want to change those iterators as of now, let them be used
+  // TODO(klecki): we don't want to change those iterators as of now, let them be used
   // actually, we need to implement replication in the ConvMmaSimt!
-  using MmaWarpSimt = cutlass::gemm::warp::ConvMmaSimt<
+  // using MmaWarpSimt = cutlass::gemm::warp::ConvMmaSimt<
+  using MmaWarpSimt = cutlass::gemm::warp::MmaSimt<
       WarpShape,    /// Size of the Gemm problem - concept: gemm::GemmShape<> 32, 64, 8 (klecki)
       ElementA,     /// Data type of A elements
       SmemLayoutA,  /// Layout of A matrix (concept: MatrixLayout)

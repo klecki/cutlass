@@ -169,6 +169,7 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
 
   /// Type used for internal memory accesses
   using AccessType = AlignedArray<Element, AccessSize, (AccessSize * sizeof_bits<Element>::value / 8)>;
+  static_assert(AccessSize == 1, "I can't access more than one element as I don't know how the coords work in that case");
 
   /// Underlying iterator to compute the addresses
   using TileAccessIterator =
@@ -216,6 +217,7 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
 
   /// Data member to the tile access iterator
   TileAccessIterator address_iterator_;
+  Pointer pointer_;
 
  public:
   /// Constructs a TileIterator from its precomputed state, threadblock offset,
@@ -224,7 +226,7 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
   PositionPredicatedTileIterator(
       /// Precomputed parameters object
       Params const &params,
-      /// Pointer to start of tensor
+      /// Pointer to the start of the Window
       Pointer pointer,
       /// Extent of tensor
       TensorCoord extent,
@@ -233,7 +235,7 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
       /// Initial offset of threadblock
       TensorCoord const &threadblock_offset)
       : address_iterator_(params.params_, pointer, extent, thread_id,
-                          threadblock_offset) {
+                          threadblock_offset), pointer_(pointer) {
     PRINT_IF
       printf("PositionPredicatedTileIterator ThreadMap::Iterations::kCount: %d ThreadMap::kElementsPerAccess: %d\n", ThreadMap::Iterations::kCount, ThreadMap::kElementsPerAccess);
   }
@@ -312,7 +314,9 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
     PRINT_IF
       printf("LOAD: kStrided: %d, kContiguous: %d, kAccessesPerVector: %d\n", ThreadMap::Iterations::kStrided, ThreadMap::Iterations::kContiguous, kAccessesPerVector);
 
-    AccessType *frag_ptr = reinterpret_cast<AccessType *>(&frag);
+    // TODO(klecki): can we unlock the bigger access patterns?
+    // AccessType *frag_ptr = reinterpret_cast<AccessType *>(&frag);
+    Pointer frag_ptr = reinterpret_cast<Pointer>(&frag);
 
     CUTLASS_PRAGMA_UNROLL
     for (int s = 0; s < ThreadMap::Iterations::kStrided; ++s) {
@@ -327,16 +331,42 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
           address_iterator_.set_iteration_index(idx);
           // (klecki): yay, it works :D
           TensorCoord current_coord = address_iterator_.get_current_coord();
-          if (address_iterator_.valid())
-            printf(">>[%d, %d, %d] LOADING COORD: (%d, %d), %d\n", threadIdx.x, threadIdx.y, threadIdx.z, current_coord.contiguous(), current_coord.strided(), (int)address_iterator_.valid());
-          char const *byte_ptr = reinterpret_cast<char const *>(address_iterator_.get()) + byte_offset;
+          // if (address_iterator_.valid())
+          //   printf(">>[%d, %d, %d] LOADING COORD: (%d, %d), %d\n", threadIdx.x, threadIdx.y, threadIdx.z, current_coord.contiguous(), current_coord.strided(), (int)address_iterator_.valid());
+          // char const *byte_ptr = reinterpret_cast<char const *>(address_iterator_.get()) + byte_offset;
 
-          AccessType const *access_ptr = reinterpret_cast<AccessType const *>(byte_ptr);
+          // AccessType const *access_ptr = reinterpret_cast<AccessType const *>(byte_ptr);
 
-          cutlass::arch::global_load<AccessType,
-                                     sizeof(AccessType)
-                                    >(
-              frag_ptr[idx], access_ptr, address_iterator_.valid());
+          // calculate based on the coord and access the pointer_ + appropriate offset
+          int col = current_coord.contiguous();
+          int row = current_coord.strided();
+          int diag_dist = row - col; // distance from diagonal - coordinate (x, x), negative are above
+          // do a switch over channels, so we divide by constant almost everytime
+          // TODO(klecki)
+          //todo: pack as function:
+          int channels = 1;
+          int window_element = diag_dist / channels;
+          int window_size = 17;
+          int radius = window_size / 2;
+          // element is used if it's our channel (we're multiple of `channels` from diagonal)
+          // and we still fit in the window
+          bool is_used = (::abs(window_element) <= radius) && (window_element * channels == diag_dist);
+
+          // PRINT_IF
+          // for (int i = 0; i < 256; i++) {
+          //   printf("window %d: %f\n", i, pointer_[i]);
+          // }
+          // pointer_ + radius is center of the window
+          const auto *access_element = pointer_ + radius + window_element;
+          frag_ptr[idx] = is_used ? *access_element : Element{};
+          // frag_ptr[idx] = row * 1000 + col;
+          printf("Loading to frag[%d], from [%d, %d]; used: %d, element %d; result %f\n", idx, row, col, (int)is_used, window_element, frag_ptr[idx]);
+
+
+          // cutlass::arch::global_load<AccessType,
+          //                            sizeof(AccessType)
+          //                           >(
+          //     frag_ptr[idx], access_ptr, address_iterator_.valid());
 
           ++address_iterator_;
         }

@@ -197,6 +197,9 @@ class PositionPredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear
   /// Offset to the first steady-state tile
   TensorCoord residue_offset_;
 
+  // offset added by add_tile_offset
+  TensorCoord added_offset_;
+
   /// Used for out-of-order visitation
   bool is_residue_tile_;
 
@@ -215,7 +218,7 @@ class PositionPredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear
     TensorCoord iteration_coord(c * ThreadMap::Delta::kContiguous + v * AccessType::kElements,
                                 s * ThreadMap::Delta::kStrided);
 
-    TensorCoord coord = thread_offset_ + iteration_coord;
+    TensorCoord coord = thread_offset_ + added_offset_ + iteration_coord;
     return coord;
   }
 
@@ -247,7 +250,7 @@ class PositionPredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear
 
       TensorCoord coord = thread_offset_ + iteration_coord;
       PRINT_IF
-        printf("PTAI: coord: %d %d; the shape <%d, %d>\n", coord.contiguous(), coord.strided(), Shape::kContiguous, Shape::kStrided);
+        printf("> PPTAI: coord: %d %d; the shape <%d, %d>\n", coord.contiguous(), coord.strided(), Shape::kContiguous, Shape::kStrided);
 
       bool guard;
 
@@ -373,7 +376,7 @@ class PositionPredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear
   void add_tile_offset(
       TensorCoord const &tile_offset) {
     PRINT_IF
-      printf("PTAI: add_tile_offset coord: %d %d; the shape <%d, %d>\n", tile_offset.contiguous(),
+      printf("> PPTAI: add_tile_offset coord: %d %d; the shape <%d, %d>\n", tile_offset.contiguous(),
          tile_offset.strided(), Shape::kContiguous, Shape::kStrided);
     if (is_residue_tile_) {
 
@@ -392,6 +395,9 @@ class PositionPredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear
         pointer_ += Shape::kStrided * tile_offset.strided();
       }
     } else {
+      // TODO(klecki): This is basically by experiment, but we can get rid of most of the
+      // pointer arithmetic here and just the position calculation
+      added_offset_ += tile_offset * TensorCoord(Shape::kContiguous, Shape::kStrided);
       if (kAdvanceRank) {
         pointer_ += params_.inc_advance_ * LongIndex(tile_offset.strided());
         pointer_ += Shape::kContiguous * tile_offset.contiguous();
@@ -405,6 +411,9 @@ class PositionPredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear
 
   CUTLASS_HOST_DEVICE
   TensorCoord get_current_coord() {
+    PRINT_IF
+      printf(">> PPTAI: %d %d %d / %d %d %d\n", iteration_contiguous_, iteration_strided_,
+          iteration_vector_, ThreadMap::Iterations::kContiguous, ThreadMap::Iterations::kStrided, kAccessesPerVector);
     return get_current_coord_(iteration_contiguous_, iteration_strided_, iteration_vector_);
   }
 
