@@ -251,6 +251,7 @@ struct Conv {
         window.data()[i] = 100;
       }
     }
+    __syncthreads();
     // PRINT_IF
     //   for (int i = 0; i < 256; i++) {
     //     printf("window %d: %f\n", i, window.data()[i]);
