@@ -379,6 +379,10 @@ class PositionPredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear
       printf("> PPTAI: add_tile_offset coord: %d %d; the shape <%d, %d>\n", tile_offset.contiguous(),
          tile_offset.strided(), Shape::kContiguous, Shape::kStrided);
     if (is_residue_tile_) {
+      PRINT_IF
+        printf(">> PPTAI: thread (%d, %d), residue: (%d, %d)\n", thread_offset_.contiguous(),
+            thread_offset_.strided(), residue_offset_.contiguous(), residue_offset_.strided());
+
 
       thread_offset_ += residue_offset_;
 
@@ -407,6 +411,11 @@ class PositionPredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear
       }
     }
     is_residue_tile_ = false;
+  }
+
+  CUTLASS_HOST_DEVICE
+  TensorCoord get_extent() {
+    return extent_;
   }
 
   CUTLASS_HOST_DEVICE

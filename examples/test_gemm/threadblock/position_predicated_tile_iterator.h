@@ -359,8 +359,50 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
           // pointer_ + radius is center of the window
           const auto *access_element = pointer_ + radius + window_element;
           frag_ptr[idx] = is_used ? *access_element : Element{};
+          // TODO(klecki) this is really a WIP, we need to implement it only for the cases we need it
+
+          // there is no way the window wraps around to us when we're not already covered with original element
+          if (is_used) {
+            int dist_up = -row;
+            int dist_down = address_iterator_.get_extent().strided() - 1 - row;
+            // add all negative coordinates, pattern is twice the dist up, twice the dist down.
+            int neg_element = window_element;
+            while (true) {
+              neg_element += 2 * dist_up;
+              if (-neg_element <= radius && dist_up != 0) {
+                frag_ptr[idx] += *(pointer_ + radius + neg_element);
+              } else {
+                break;
+              }
+              neg_element -= 2 * dist_down;
+              if (-neg_element <= radius) {
+                frag_ptr[idx] += *(pointer_ + radius + neg_element);
+              } else {
+                break;
+              }
+            }
+            // add all positive coordinates
+            int pos_element = window_element;
+            while (true) {
+              pos_element += 2 * dist_down;
+              if (pos_element <= radius && dist_down != 0) {
+                frag_ptr[idx] += *(pointer_ + radius + pos_element);
+              } else {
+                break;
+              }
+              pos_element -= 2 * dist_up;
+              if (pos_element <= radius) {
+                frag_ptr[idx] += *(pointer_ + radius + pos_element);
+              } else {
+                break;
+              }
+            }
+          }
+
+
+
           // frag_ptr[idx] = row * 1000 + col;
-          printf("Loading to frag[%d], from [%d, %d]; used: %d, element %d; result %f\n", idx, row, col, (int)is_used, window_element, frag_ptr[idx]);
+          // printf("Loading to frag[%d], from [%d, %d]; used: %d, element %d; result %f\n", idx, row, col, (int)is_used, window_element, frag_ptr[idx]);
 
 
           // cutlass::arch::global_load<AccessType,
