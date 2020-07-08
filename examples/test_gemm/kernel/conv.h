@@ -31,6 +31,8 @@
 
 #include "cutlass/cutlass.h"
 
+
+#include "cutlass/array.h"
 #include "cutlass/gemm/gemm.h"
 #include "cutlass/matrix_coord.h"
 #include "cutlass/semaphore.h"
@@ -50,6 +52,7 @@ template <
   bool SplitKSerial               ///! If true, code supporting split-K via serial reduction is enabled.
 >
 struct Conv {
+  constexpr static int kAxes = 2;
 
 
   using Mma = Mma_;
@@ -66,7 +69,11 @@ struct Conv {
 
   /// Parameters structure
   struct Params {
-    cutlass::gemm::GemmCoord problem_size;
+    cutlass::Array<int, kAxes> matrix_dims;
+    cutlass::Array<int, kAxes> window_sizes;
+    int channels;
+    cutlass::gemm::GemmCoord problem_size_inner;
+    cutlass::gemm::GemmCoord problem_size_outer;
     cutlass::gemm::GemmCoord grid_tiled_shape;
     typename Mma::IteratorA::Params params_A;
     typename Mma::IteratorA::TensorRef ref_A;
@@ -78,19 +85,23 @@ struct Conv {
     typename Epilogue::OutputTileIterator::TensorRef ref_D;
     typename OutputOp::Params output_op;
     int *semaphore;
-    int gemm_k_iterations;
-    int gemm_k_size;
+    int gemm_k_iterations; // TODO(klecki): LOL, this is not set
+    // int gemm_k_size;
+    int gemm_k_size_inner;
+    int gemm_k_size_outer;
 
     //
     // Methods
     //
 
     CUTLASS_HOST_DEVICE
-    Params(): semaphore(0), gemm_k_iterations(0), gemm_k_size(0) { }
+    Params(): semaphore(0) {} //, gemm_k_iterations(0), gemm_k_size(0) { }
 
     CUTLASS_HOST_DEVICE
     Params(
-      cutlass::gemm::GemmCoord const & problem_size,
+      const Array<int, kAxes> &matrix_dims_,
+      const Array<int, kAxes> &window_sizes_,
+      int channels_,
       cutlass::gemm::GemmCoord const & grid_tiled_shape,
       typename Mma::IteratorA::TensorRef ref_A,
       typename Mma::IteratorB::TensorRef ref_B,
@@ -99,7 +110,14 @@ struct Conv {
       typename OutputOp::Params output_op = typename OutputOp::Params(),
       int *workspace = nullptr
     ):
-      problem_size(problem_size),
+      matrix_dims(matrix_dims_),
+      window_sizes(window_sizes_),
+      channels(channels_),
+      // TODO(klecki): not the most obvious place for problem size calculation
+      // Left matrix is H x WC = M x K, virtual right is WC x WC = K x N, hence M, N, K := H, WC, WC
+      problem_size_inner(matrix_dims[0], matrix_dims[1] * channels, matrix_dims[1] * channels),
+      // Right matrix is H x WC = K x N, left is H x H = M x K; hence M, N, K := H, WC, H
+      problem_size_outer(matrix_dims[0], matrix_dims[1] * channels, matrix_dims[0]),
       grid_tiled_shape(grid_tiled_shape),
       params_A(ref_A.layout()),
       ref_A(ref_A),
@@ -111,13 +129,22 @@ struct Conv {
       ref_D(ref_D),
       output_op(output_op) {
 
+      // int total_gemm_k_iterations = (problem_size.k() + Mma::Shape::kK - 1) / Mma::Shape::kK;
+      // int gemm_k_iterations = (total_gemm_k_iterations + grid_tiled_shape.k() - 1) / grid_tiled_shape.k();
+
+      gemm_k_size_inner = calc_gemm_k_size(problem_size_inner, grid_tiled_shape);
+      gemm_k_size_outer = calc_gemm_k_size(problem_size_outer, grid_tiled_shape);
+
+      semaphore = workspace;
+    }
+
+    CUTLASS_HOST_DEVICE
+    static int calc_gemm_k_size(gemm::GemmCoord const &problem_size, GemmCoord const &grid_tiled_shape) {
       int total_gemm_k_iterations = (problem_size.k() + Mma::Shape::kK - 1) / Mma::Shape::kK;
       int gemm_k_iterations = (total_gemm_k_iterations + grid_tiled_shape.k() - 1) / grid_tiled_shape.k();
-
-      gemm_k_size = gemm_k_iterations * Mma::Shape::kK;
-
-    semaphore = workspace;
+      return gemm_k_iterations * Mma::Shape::kK;
     }
+
   };
 
   /// Shared memory storage structure
@@ -196,11 +223,11 @@ struct Conv {
     // we need to make this "more virtual"
     cutlass::MatrixCoord tb_offset_A{
       threadblock_tile_offset.m() * Mma::Shape::kM,
-      threadblock_tile_offset.k() * params.gemm_k_size,
+      threadblock_tile_offset.k() * params.gemm_k_size_inner,
     };
 
     cutlass::MatrixCoord tb_offset_B{
-      threadblock_tile_offset.k() * params.gemm_k_size,
+      threadblock_tile_offset.k() * params.gemm_k_size_inner,
       threadblock_tile_offset.n() * Mma::Shape::kN
     };
     // todo(klecki): and here are the tile coordinates, woohoo
@@ -210,8 +237,8 @@ struct Conv {
 
     // Problem size is a function of threadblock index in the K dimension
     int problem_size_k = min(
-      params.problem_size.k(),
-      (threadblock_tile_offset.k() + 1) * params.gemm_k_size);
+      params.problem_size_inner.k(),
+      (threadblock_tile_offset.k() + 1) * params.gemm_k_size_inner);
 
     // Compute threadblock-scoped matrix multiply-add
     int gemm_k_iterations = (problem_size_k - tb_offset_A.column() + Mma::Shape::kK - 1) / Mma::Shape::kK;
@@ -229,7 +256,7 @@ struct Conv {
     typename Mma::IteratorA iterator_A(
       params.params_A,
       params.ref_A.data(),
-      {params.problem_size.m(), problem_size_k},
+      {params.problem_size_inner.m(), problem_size_k},
       thread_idx,
       tb_offset_A);
 
@@ -261,7 +288,7 @@ struct Conv {
     typename Mma::IteratorB iterator_B(
       params.params_B,
       window.data(),
-      {problem_size_k, params.problem_size.n()}, // TODO(klecki) sizes etc are dummy
+      {problem_size_k, params.problem_size_inner.n()}, // TODO(klecki) sizes etc are dummy
       thread_idx,
       tb_offset_B);
 
@@ -325,7 +352,7 @@ struct Conv {
     typename Epilogue::OutputTileIterator iterator_C(
       params.params_C,
       params.ref_C.data(),
-      params.problem_size.mn(),
+      params.problem_size_inner.mn(),
       thread_idx,
       threadblock_offset
     );
@@ -334,7 +361,7 @@ struct Conv {
     typename Epilogue::OutputTileIterator iterator_D(
       params.params_D,
       params.ref_D.data(),
-      params.problem_size.mn(),
+      params.problem_size_inner.mn(),
       thread_idx,
       threadblock_offset
     );

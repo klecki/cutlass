@@ -61,6 +61,7 @@
 // CUTLASS includes needed for single-precision GEMM kernel
 //
 #include "device/conv.h"
+#include "cutlass/array.h"
 
 // Defines cutlass::gemm::device::Gemm, the generic Gemm computation template class.
 #include "cutlass/gemm/device/gemm.h"
@@ -119,6 +120,9 @@ cudaError_t CutlassSgemmNN(
   // Define a CUTLASS GEMM type
   CutlassConv gemm_operator;
 
+
+  int window_size = 17;
+
   // Construct the CUTLASS GEMM arguments object.
   //
   // One of CUTLASS's design patterns is to define gemm argument objects that are constructible
@@ -128,9 +132,22 @@ cudaError_t CutlassSgemmNN(
   // The benefits of this pattern are (1.) a structured, composable strategy for passing host-constructible
   // arguments to kernels and (2.) minimized initialization overhead on kernel entry.
   //
-  CutlassConv::Arguments args({M , N, K},  // Gemm Problem dimensions
+
+  // TODO(klecki): The cutlass::Array doesn't have an aggregate constructor :C
+  cutlass::Array<int, 2> size;
+  size[0] = M;
+  size[1] = N;
+  cutlass::Array<int, 2> window_sizes;
+  cutlass::Array<float const *, 2> windows;
+  for (int i = 0; i < 2; i++) {
+    window_sizes[i] = window_size;
+    windows[i] = B;
+  }
+  CutlassConv::Arguments args(size,  // Input matrix dimensions
+                              window_sizes, // Window sizes
+                              1, // channels count (innermost)
                               {A, lda},    // Tensor-ref for source matrix A
-                              {B, ldb},    // Tensor-ref for source matrix B
+                              windows,    // Pointers to windows
                               {C, ldc},    // Tensor-ref for source matrix C
                               {C, ldc},    // Tensor-ref for destination matrix D (may be different memory than source C matrix)
                               {alpha, beta}); // Scalars used in the Epilogue

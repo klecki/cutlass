@@ -100,8 +100,8 @@ namespace device {
 
     cutlass::Status status = gemm_op({
       {m, n, k},                          // GemmCoord problem_size,
-      {A, lda},                           // TensorRef<float, layout::ColumnMajor> ref_A,
-      {B, ldb},                           // TensorRef<float, layout::ColumnMajor> ref_B,
+      {A, lda},                           // TensorRef<float, layout::ColumnMajor> ref_In,
+      {B, ldb},                           // TensorRef<float, layout::ColumnMajor> ref_Windows,
       {C, ldc},                           // TensorRef<float, layout::ColumnMajor> ref_C,
       {D, ldd},                           // TensorRef<float, layout::ColumnMajor> ref_D,
       {alpha, beta}                       // EpilogueOutputOp::Params epilogue_op_params
@@ -170,7 +170,7 @@ template <
     /// Layout type for C and D matrix operands
     typename LayoutOut_,
     // Number of input data axes to process
-    int axes_ = 2,
+    int Axes = 2,
     /// Element type for internal accumulation
     typename ElementAccumulator_ = ElementOut_,
     /// Operator class tag
@@ -246,6 +246,9 @@ class Conv {
   static bool const kIsBetaZero = IsBetaZero;
   static ComplexTransform const kTransformA = ComplexTransform::kNone;
   static ComplexTransform const kTransformB = ComplexTransform::kNone;
+  static_assert(kSplitKSerial == false, "Only basic options are supported");
+  static int const split_k_slices = 1; // TODO(klecki): investigate how this can be used, now assume 1
+  static int const kAxes = Axes;
 
   /// Define the kernel, SIMT
   using GemmKernel = typename kernel::DefaultConv<
@@ -277,44 +280,47 @@ class Conv {
     //
     // Data members
     //
-
-    GemmCoord problem_size;
-    TensorRef<ElementIn const, LayoutIn> ref_A;
-    TensorRef<ElementWindow const, LayoutWindow> ref_B;
+    // GemmCoord problem_size;
+    Array<int, kAxes> matrix_dims;
+    Array<int, kAxes> window_sizes;
+    int channels;
+    TensorRef<ElementIn const, LayoutIn> ref_In;
+    Array<ElementWindow const*, kAxes> ref_Windows;
     TensorRef<ElementOut const, LayoutOut> ref_C;
     TensorRef<ElementOut, LayoutOut> ref_D;
     typename EpilogueOutputOp::Params epilogue;
-    int split_k_slices;
 
     //
     // Methods
     //
 
     /// Default ctor
-    CUTLASS_HOST_DEVICE
-    Arguments(): problem_size(0, 0, 0), split_k_slices(1) {
+    // CUTLASS_HOST_DEVICE
+    // Arguments(): problem_size(0, 0, 0), split_k_slices(1) {
 
-    }
+    // }
 
     /// Constructs an Arguments structure
     CUTLASS_HOST_DEVICE
     Arguments(
-      GemmCoord problem_size_,
-      TensorRef<ElementIn const, LayoutIn> ref_A_,
-      TensorRef<ElementWindow const, LayoutWindow> ref_B_,
+      Array<int, kAxes> matrix_dims_,
+      Array<int, kAxes> window_sizes_,
+      int channels_,
+      TensorRef<ElementIn const, LayoutIn> ref_In_,
+      Array<ElementWindow const*, kAxes> ref_Windows_,
       TensorRef<ElementOut const, LayoutOut> ref_C_,
       TensorRef<ElementOut, LayoutOut> ref_D_,
       typename EpilogueOutputOp::Params epilogue_ =
-        typename EpilogueOutputOp::Params(),
-      int split_k_slices = 1
+        typename EpilogueOutputOp::Params()
     ):
-      problem_size(problem_size_),
-      ref_A(ref_A_),
-      ref_B(ref_B_),
+      matrix_dims(matrix_dims_),
+      window_sizes(window_sizes_),
+      channels(channels_),
+      ref_In(ref_In_),
+      ref_Windows(ref_Windows_),
       ref_C(ref_C_),
       ref_D(ref_D_),
-      epilogue(epilogue_),
-      split_k_slices(split_k_slices) {
+      epilogue(epilogue_){
 
     }
   };
@@ -332,51 +338,53 @@ public:
   /// Determines whether the GEMM can execute the given problem.
   static Status can_implement(Arguments const &args) {
 
-    if (!kSplitKSerial && args.split_k_slices > 1) {
+    // we assume kSplitKSerial == false, so this will prevent split_k_slices != 1
+    if (!kSplitKSerial && split_k_slices > 1) {
       return Status::kErrorInvalidProblem;
     }
 
-    Status status = GemmKernel::can_implement(
-      args.problem_size,
-      args.ref_A.non_const_ref(),
-      args.ref_B.non_const_ref(),
-      args.ref_C.non_const_ref(),
-      args.ref_D
-    );
+    //TODO(klecki): fixup
+    // Status status = GemmKernel::can_implement(
+    //   args.problem_size,
+    //   args.ref_In.non_const_ref(),
+    //   args.ref_Windows.non_const_ref(),
+    //   args.ref_C.non_const_ref(),
+    //   args.ref_D
+    // );
 
-    if (status != Status::kSuccess) {
-      return status;
-    }
+    // if (status != Status::kSuccess) {
+    //   return status;
+    // }
 
     return Status::kSuccess;
   }
 
-  /// Gets the workspace size
-  static size_t get_workspace_size(Arguments const &args) {
+  // /// Gets the workspace size
+  // static size_t get_workspace_size(Arguments const &args) {
 
-    size_t bytes = 0;
+  //   size_t bytes = 0;
 
-    // Determine grid shape
-    ThreadblockSwizzle threadblock_swizzle;
+  //   // Determine grid shape
+  //   ThreadblockSwizzle threadblock_swizzle;
 
-    cutlass::gemm::GemmCoord tiled_shape = threadblock_swizzle.get_tiled_shape(
-      args.problem_size,
-      {ThreadblockShape::kM, ThreadblockShape::kN, ThreadblockShape::kK},
-      args.split_k_slices);
+  //   cutlass::gemm::GemmCoord tiled_shape = threadblock_swizzle.get_tiled_shape(
+  //     args.problem_size,
+  //     {ThreadblockShape::kM, ThreadblockShape::kN, ThreadblockShape::kK},
+  //     split_k_slices);
 
-    printf(">> get_workspace_size:\nProblem Size: (%d, %d, %d), block (%d, %d, %d), k_slices: %d -> shape (%d, %d, %d)\n",
-       args.problem_size.m(), args.problem_size.n(), args.problem_size.k(),
-       ThreadblockShape::kM, ThreadblockShape::kN, ThreadblockShape::kK,
-       args.split_k_slices,
-       tiled_shape.m(), tiled_shape.n(), tiled_shape.k());
+  //   printf(">> get_workspace_size:\nProblem Size: (%d, %d, %d), block (%d, %d, %d), k_slices: %d -> shape (%d, %d, %d)\n",
+  //      args.problem_size.m(), args.problem_size.n(), args.problem_size.k(),
+  //      ThreadblockShape::kM, ThreadblockShape::kN, ThreadblockShape::kK,
+  //      split_k_slices,
+  //      tiled_shape.m(), tiled_shape.n(), tiled_shape.k());
 
-    if (kSplitKSerial && args.split_k_slices > 1) {
+  //   if (kSplitKSerial && split_k_slices > 1) {
 
-      bytes += sizeof(int) * size_t(tiled_shape.m()) * size_t(tiled_shape.n());
-    }
+  //     bytes += sizeof(int) * size_t(tiled_shape.m()) * size_t(tiled_shape.n());
+  //   }
 
-    return bytes;
-  }
+  //   return bytes;
+  // }
 
   /// Initializes GEMM state from arguments.
   Status initialize(Arguments const &args, void *workspace = nullptr, cudaStream_t stream = nullptr) {
@@ -384,45 +392,51 @@ public:
     // Determine grid shape
     ThreadblockSwizzle threadblock_swizzle;
 
+    // The basic threadblock swizzle takes only M and N dims into account here
+    int dummy_k = 1;
+    GemmCoord problem_size(args.matrix_dims[0], args.matrix_dims[1] * args.channels, dummy_k);
     cutlass::gemm::GemmCoord grid_shape = threadblock_swizzle.get_tiled_shape(
-      args.problem_size,
+      problem_size,
       {ThreadblockShape::kM, ThreadblockShape::kN, ThreadblockShape::kK},
-      args.split_k_slices);
+      split_k_slices);
 
     printf(">> initialize:\nProblem Size: (%d, %d, %d), block (%d, %d, %d), k_slices: %d -> grid_shape (%d, %d, %d)\n",
-       args.problem_size.m(), args.problem_size.n(), args.problem_size.k(),
+       problem_size.m(), problem_size.n(), problem_size.k(),
        ThreadblockShape::kM, ThreadblockShape::kN, ThreadblockShape::kK,
-       args.split_k_slices,
+       split_k_slices,
        grid_shape.m(), grid_shape.n(), grid_shape.k());
 
-    if (kSplitKSerial) {
-      if (args.split_k_slices > 1) {
-        if (!workspace) {
-          return Status::kErrorWorkspaceNull;
-        }
+    // if (kSplitKSerial) {
+    //   if (split_k_slices > 1) {
+    //     if (!workspace) {
+    //       return Status::kErrorWorkspaceNull;
+    //     }
 
-        size_t bytes = get_workspace_size(args);
+    //     size_t bytes = get_workspace_size(args);
 
-        cudaError_t result = cudaMemsetAsync(workspace, 0, bytes, stream);
+    //     cudaError_t result = cudaMemsetAsync(workspace, 0, bytes, stream);
 
-        if (result != cudaSuccess) {
-          return Status::kErrorInternal;
-        }
-      }
-    }
-    else {
+    //     if (result != cudaSuccess) {
+    //       return Status::kErrorInternal;
+    //     }
+    //   }
+    // }
+    // else {
 
-      if (args.split_k_slices > 1) {
-        return Status::kErrorInvalidProblem;
-      }
-    }
+    //   if (split_k_slices > 1) {
+    //     return Status::kErrorInvalidProblem;
+    //   }
+    // }
 
     // Initialize the Params structure
     params_ = typename GemmKernel::Params{
-      args.problem_size,
+      args.matrix_dims,
+      args.window_sizes,
+      args.channels,
       grid_shape,
-      args.ref_A.non_const_ref(),
-      args.ref_B.non_const_ref(),
+      args.ref_In.non_const_ref(),
+      args.ref_In.non_const_ref(),
+      // args.ref_Windows,
       args.ref_C.non_const_ref(),
       args.ref_D,
       args.epilogue,
@@ -432,24 +446,26 @@ public:
     return Status::kSuccess;
   }
 
-  /// Lightweight update given a subset of arguments
-  Status update(Arguments const &args, void *workspace = nullptr) {
+    // TODO(klecki): this just swaps the pointers, but we actually need to swap the sizes as weel,
+    // need to use initialize
+  // /// Lightweight update given a subset of arguments
+  // Status update(Arguments const &args, void *workspace = nullptr) {
 
-    if (kSplitKSerial && args.split_k_slices > 1) {
-      if (!workspace) {
-        return Status::kErrorWorkspaceNull;
-      }
-    }
+  //   if (kSplitKSerial && args.split_k_slices > 1) {
+  //     if (!workspace) {
+  //       return Status::kErrorWorkspaceNull;
+  //     }
+  //   }
 
-    params_.ref_A.reset(args.ref_A.non_const_ref().data());
-    params_.ref_B.reset(args.ref_B.non_const_ref().data());
-    params_.ref_C.reset(args.ref_C.non_const_ref().data());
-    params_.ref_D.reset(args.ref_D.data());
-    params_.output_op = args.epilogue;
-    params_.semaphore = static_cast<int *>(workspace);
+  //   params_.ref_In.reset(args.ref_In.non_const_ref().data());
+  //   params_.ref_Windows.reset(args.ref_Windows.non_const_ref().data());
+  //   params_.ref_C.reset(args.ref_C.non_const_ref().data());
+  //   params_.ref_D.reset(args.ref_D.data());
+  //   params_.output_op = args.epilogue;
+  //   params_.semaphore = static_cast<int *>(workspace);
 
-    return Status::kSuccess;
-  }
+  //   return Status::kSuccess;
+  // }
 
   /// Runs the kernel using initialized state.
   Status run(cudaStream_t stream = nullptr) {
