@@ -112,22 +112,22 @@ namespace device {
 
     template <
       /// Element type for A matrix operand
-      typename ElementA,
+      typename ElementIn,
 
       /// Layout type for A matrix operand
-      typename LayoutA,
+      typename LayoutIn,
 
       /// Element type for B matrix operand
-      typename ElementB,
+      typename ElementWindow,
 
       /// Layout type for B matrix operand
-      typename LayoutB,
+      typename LayoutWindow,
 
       /// Element type for C and D matrix operands
-      typename ElementC,
+      typename ElementOut,
 
       /// Layout type for C and D matrix operands
-      typename LayoutC,
+      typename LayoutOut,
 
       /// Element type for internal accumulation
       typename ElementAccumulator,
@@ -159,76 +159,76 @@ namespace device {
     class Conv;
 */
 template <
-    /// Element type for A matrix operand
-    typename ElementA_,
-    /// Layout type for A matrix operand
-    typename LayoutA_,
-    /// Element type for B matrix operand
-    typename ElementB_,
-    /// Layout type for B matrix operand
-    typename LayoutB_,
+    /// Element type for input matrix operand
+    typename ElementIn_,
+    /// Layout type for input matrix operand
+    typename LayoutIn_,
+    /// Element type for window operands
+    typename ElementWindow_,
     /// Element type for C and D matrix operands
-    typename ElementC_,
+    typename ElementOut_,
     /// Layout type for C and D matrix operands
-    typename LayoutC_,
+    typename LayoutOut_,
+    // Number of input data axes to process
+    int axes_ = 2,
     /// Element type for internal accumulation
-    typename ElementAccumulator_ = ElementC_,
+    typename ElementAccumulator_ = ElementOut_,
     /// Operator class tag
     typename OperatorClass_ = arch::OpClassSimt,
     /// Tag indicating architecture to tune for
     typename ArchTag_ = arch::Sm70,
     /// Threadblock-level tile size (concept: GemmShape)
     typename ThreadblockShape_ = typename DefaultConvConfiguration<
-        OperatorClass_, ArchTag_, ElementA_, ElementB_, ElementC_,
+        OperatorClass_, ArchTag_, ElementIn_, ElementWindow_, ElementOut_,
         ElementAccumulator_>::ThreadblockShape,
     /// Warp-level tile size (concept: GemmShape)
     typename WarpShape_ = typename DefaultConvConfiguration<
-        OperatorClass_, ArchTag_, ElementA_, ElementB_, ElementC_,
+        OperatorClass_, ArchTag_, ElementIn_, ElementWindow_, ElementOut_,
         ElementAccumulator_>::WarpShape,
     /// Instruction-level tile size (concept: GemmShape)
     typename InstructionShape_ = typename DefaultConvConfiguration<
-        OperatorClass_, ArchTag_, ElementA_, ElementB_, ElementC_,
+        OperatorClass_, ArchTag_, ElementIn_, ElementWindow_, ElementOut_,
         ElementAccumulator_>::InstructionShape,
     /// Epilogue output operator
     typename EpilogueOutputOp_ = typename DefaultConvConfiguration<
-        OperatorClass_, ArchTag_, ElementA_, ElementB_, ElementC_,
+        OperatorClass_, ArchTag_, ElementIn_, ElementWindow_, ElementOut_,
         ElementAccumulator_>::EpilogueOutputOp,
     /// Threadblock-level swizzling operator
     typename ThreadblockSwizzle_ =
         typename threadblock::GemmIdentityThreadblockSwizzle<>,
     /// Number of stages used in the pipelined mainloop
     int Stages =
-        DefaultConvConfiguration<OperatorClass_, ArchTag_, ElementA_, ElementB_,
-                                 ElementC_, ElementAccumulator_>::kStages,
+        DefaultConvConfiguration<OperatorClass_, ArchTag_, ElementIn_, ElementWindow_,
+                                 ElementOut_, ElementAccumulator_>::kStages,
     /// Access granularity of A matrix in units of elements
     int AlignmentA =
-        DefaultConvConfiguration<OperatorClass_, ArchTag_, ElementA_, ElementB_,
-                                 ElementC_, ElementAccumulator_>::kAlignmentA,
+        DefaultConvConfiguration<OperatorClass_, ArchTag_, ElementIn_, ElementWindow_,
+                                 ElementOut_, ElementAccumulator_>::kAlignmentA,
     /// Access granularity of B matrix in units of elements
     int AlignmentB =
-        DefaultConvConfiguration<OperatorClass_, ArchTag_, ElementA_, ElementB_,
-                                 ElementC_, ElementAccumulator_>::kAlignmentB,
+        DefaultConvConfiguration<OperatorClass_, ArchTag_, ElementIn_, ElementWindow_,
+                                 ElementOut_, ElementAccumulator_>::kAlignmentB,
     /// If true, kernel supports split-K with serial reduction
     bool SplitKSerial = false,
     /// Operation performed by GEMM
     typename Operator_ = typename DefaultConvConfiguration<
-        OperatorClass_, ArchTag_, ElementA_, ElementB_, ElementC_,
+        OperatorClass_, ArchTag_, ElementIn_, ElementWindow_, ElementOut_,
         ElementAccumulator_>::Operator,
     /// Whether Beta is zero or not
     bool IsBetaZero = false>
 class Conv {
  public:
 
-  using ElementA = ElementA_;
-  using LayoutA = LayoutA_;
-  using TensorRefA = TensorRef<ElementA const, LayoutA>;
-  using ElementB = ElementB_;
-  using LayoutB = LayoutB_;
-  using TensorRefB = TensorRef<ElementB const, LayoutB>;
-  using ElementC = ElementC_;
-  using LayoutC = LayoutC_;
-  using TensorRefC = TensorRef<ElementC const, LayoutC>;
-  using TensorRefD = TensorRef<ElementC, LayoutC>;
+  using ElementIn = ElementIn_;
+  using LayoutIn = LayoutIn_;
+  using TensorRefA = TensorRef<ElementIn const, LayoutIn>;
+  using ElementWindow = ElementWindow_;
+  using LayoutWindow = layout::RowMajor; // TODO(klecki): placeholder
+  using TensorRefB = TensorRef<ElementWindow const, LayoutWindow>;
+  using ElementOut = ElementOut_;
+  using LayoutOut = LayoutOut_;
+  using TensorRefC = TensorRef<ElementOut const, LayoutOut>;
+  using TensorRefD = TensorRef<ElementOut, LayoutOut>;
   using ElementAccumulator = ElementAccumulator_;
   using OperatorClass = OperatorClass_;
   using ArchTag = ArchTag_;
@@ -249,14 +249,14 @@ class Conv {
 
   /// Define the kernel, SIMT
   using GemmKernel = typename kernel::DefaultConv<
-    ElementA,
-    LayoutA,
+    ElementIn,
+    LayoutIn,
     kAlignmentA,
-    ElementB,
-    LayoutB,
+    ElementWindow,
+    LayoutWindow,
     kAlignmentB,
-    ElementC,
-    LayoutC,
+    ElementOut,
+    LayoutOut,
     ElementAccumulator,
     OperatorClass,
     ArchTag,
@@ -279,10 +279,10 @@ class Conv {
     //
 
     GemmCoord problem_size;
-    TensorRef<ElementA const, LayoutA> ref_A;
-    TensorRef<ElementB const, LayoutB> ref_B;
-    TensorRef<ElementC const, LayoutC> ref_C;
-    TensorRef<ElementC, LayoutC> ref_D;
+    TensorRef<ElementIn const, LayoutIn> ref_A;
+    TensorRef<ElementWindow const, LayoutWindow> ref_B;
+    TensorRef<ElementOut const, LayoutOut> ref_C;
+    TensorRef<ElementOut, LayoutOut> ref_D;
     typename EpilogueOutputOp::Params epilogue;
     int split_k_slices;
 
@@ -300,10 +300,10 @@ class Conv {
     CUTLASS_HOST_DEVICE
     Arguments(
       GemmCoord problem_size_,
-      TensorRef<ElementA const, LayoutA> ref_A_,
-      TensorRef<ElementB const, LayoutB> ref_B_,
-      TensorRef<ElementC const, LayoutC> ref_C_,
-      TensorRef<ElementC, LayoutC> ref_D_,
+      TensorRef<ElementIn const, LayoutIn> ref_A_,
+      TensorRef<ElementWindow const, LayoutWindow> ref_B_,
+      TensorRef<ElementOut const, LayoutOut> ref_C_,
+      TensorRef<ElementOut, LayoutOut> ref_D_,
       typename EpilogueOutputOp::Params epilogue_ =
         typename EpilogueOutputOp::Params(),
       int split_k_slices = 1

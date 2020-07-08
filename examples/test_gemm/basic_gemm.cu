@@ -103,22 +103,21 @@ cudaError_t CutlassSgemmNN(
   using ColumnMajor = cutlass::layout::ColumnMajor;
   using RowMajor = cutlass::layout::RowMajor;
 
-  // using CutlassGemm = cutlass::gemm::device::DaliExtendedGemm<A_type,        // Data-type of A matrix
+  // using CutlassConv = cutlass::gemm::device::DaliExtendedGemm<A_type,        // Data-type of A matrix
   //                                                 ColumnMajor,  // Layout of A matrix
   //                                                 B_type,        // Data-type of B matrix
   //                                                 ColumnMajor,  // Layout of B matrix
   //                                                 C_type,        // Data-type of C matrix
   //                                                 ColumnMajor>; // Layout of C matrix
 
-  using CutlassGemm = cutlass::gemm::device::Conv<A_type,        // Data-type of A matrix
+  using CutlassConv = cutlass::gemm::device::Conv<A_type,        // Data-type of A matrix
                                                   RowMajor,  // Layout of A matrix
                                                   B_type,        // Data-type of B matrix
-                                                  RowMajor,  // Layout of B matrix
                                                   C_type,        // Data-type of C matrix
                                                   RowMajor>; // Layout of C matrix
 
   // Define a CUTLASS GEMM type
-  CutlassGemm gemm_operator;
+  CutlassConv gemm_operator;
 
   // Construct the CUTLASS GEMM arguments object.
   //
@@ -129,7 +128,7 @@ cudaError_t CutlassSgemmNN(
   // The benefits of this pattern are (1.) a structured, composable strategy for passing host-constructible
   // arguments to kernels and (2.) minimized initialization overhead on kernel entry.
   //
-  CutlassGemm::Arguments args({M , N, K},  // Gemm Problem dimensions
+  CutlassConv::Arguments args({M , N, K},  // Gemm Problem dimensions
                               {A, lda},    // Tensor-ref for source matrix A
                               {B, ldb},    // Tensor-ref for source matrix B
                               {C, ldc},    // Tensor-ref for source matrix C
@@ -484,7 +483,7 @@ void print_mat(int rows, int cols, const std::vector<T> &mat, int max_rows = -1,
 
 /// Allocate several matrices in GPU device memory and call a single-precision
 /// CUTLASS GEMM kernel.
-cudaError_t TestCutlassGemm(int M, int N, int K, A_type alpha, C_type beta) {
+cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta) {
   cudaError_t result;
 
 
@@ -723,7 +722,7 @@ int main(int argc, const char *arg[]) {
   // Run the CUTLASS GEMM test.
   //
 
-  cudaError_t result = TestCutlassGemm(
+  cudaError_t result = TestCutlassConv(
     problem[0],     // GEMM M dimension
     problem[1],     // GEMM N dimension
     problem[2],     // GEMM K dimension
