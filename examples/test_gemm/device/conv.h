@@ -285,7 +285,7 @@ class Conv {
     Array<int, kAxes> window_sizes;
     int channels;
     TensorRef<ElementIn const, LayoutIn> ref_In;
-    Array<ElementWindow const*, kAxes> ref_Windows;
+    Array<ElementWindow*, kAxes> ref_Windows;
     TensorRef<ElementOut const, LayoutOut> ref_C;
     TensorRef<ElementOut, LayoutOut> ref_D;
     typename EpilogueOutputOp::Params epilogue;
@@ -307,7 +307,7 @@ class Conv {
       Array<int, kAxes> window_sizes_,
       int channels_,
       TensorRef<ElementIn const, LayoutIn> ref_In_,
-      Array<ElementWindow const*, kAxes> ref_Windows_,
+      Array<ElementWindow*, kAxes> ref_Windows_,
       TensorRef<ElementOut const, LayoutOut> ref_C_,
       TensorRef<ElementOut, LayoutOut> ref_D_,
       typename EpilogueOutputOp::Params epilogue_ =
@@ -435,8 +435,8 @@ public:
       args.channels,
       grid_shape,
       args.ref_In.non_const_ref(),
-      args.ref_In.non_const_ref(),
-      // args.ref_Windows,
+      // args.ref_In.non_const_ref(),
+      args.ref_Windows,
       args.ref_C.non_const_ref(),
       args.ref_D,
       args.epilogue,

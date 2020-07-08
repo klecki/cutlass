@@ -138,10 +138,10 @@ cudaError_t CutlassSgemmNN(
   size[0] = M;
   size[1] = N;
   cutlass::Array<int, 2> window_sizes;
-  cutlass::Array<float const *, 2> windows;
+  cutlass::Array<float *, 2> windows;
   for (int i = 0; i < 2; i++) {
     window_sizes[i] = window_size;
-    windows[i] = B;
+    windows[i] = const_cast<B_type*>(B); // TODO(klecki): passing non-const value, cause CUTLASS is using non-const refs due to RW iterators (even when only reading)
   }
   CutlassConv::Arguments args(size,  // Input matrix dimensions
                               window_sizes, // Window sizes

@@ -36,6 +36,7 @@
 #include "cutlass/gemm/gemm.h"
 #include "cutlass/matrix_coord.h"
 #include "cutlass/semaphore.h"
+#include "cutlass/layout/pitch_linear.h"
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -75,10 +76,11 @@ struct Conv {
     cutlass::gemm::GemmCoord problem_size_inner;
     cutlass::gemm::GemmCoord problem_size_outer;
     cutlass::gemm::GemmCoord grid_tiled_shape;
-    typename Mma::IteratorA::Params params_A;
-    typename Mma::IteratorA::TensorRef ref_A;
-    typename Mma::IteratorB::Params params_B;
-    typename Mma::IteratorB::TensorRef ref_B;
+    typename Mma::IteratorA::Params params_In;
+    typename Mma::IteratorA::TensorRef ref_In;
+    Array<typename Mma::IteratorB::Element *, kAxes> windows;
+    typename Mma::IteratorB::Params params_Window_inner;
+    // typename Mma::IteratorB::Params params_Window_inner;
     typename Epilogue::OutputTileIterator::Params params_C;
     typename Epilogue::OutputTileIterator::TensorRef ref_C;
     typename Epilogue::OutputTileIterator::Params params_D;
@@ -103,8 +105,8 @@ struct Conv {
       const Array<int, kAxes> &window_sizes_,
       int channels_,
       cutlass::gemm::GemmCoord const & grid_tiled_shape,
-      typename Mma::IteratorA::TensorRef ref_A,
-      typename Mma::IteratorB::TensorRef ref_B,
+      typename Mma::IteratorA::TensorRef ref_In,
+      const Array<typename Mma::IteratorB::Element *, kAxes> &windows_,
       typename Epilogue::OutputTileIterator::TensorRef ref_C,
       typename Epilogue::OutputTileIterator::TensorRef ref_D,
       typename OutputOp::Params output_op = typename OutputOp::Params(),
@@ -119,10 +121,10 @@ struct Conv {
       // Right matrix is H x WC = K x N, left is H x H = M x K; hence M, N, K := H, WC, H
       problem_size_outer(matrix_dims[0], matrix_dims[1] * channels, matrix_dims[0]),
       grid_tiled_shape(grid_tiled_shape),
-      params_A(ref_A.layout()),
-      ref_A(ref_A),
-      params_B(ref_B.layout()),
-      ref_B(ref_B),
+      params_In(ref_In.layout()),
+      ref_In(ref_In),
+      windows(windows_),
+      params_Window_inner{layout::RowMajor{problem_size_inner.n()}},
       params_C(ref_C.layout()),
       ref_C(ref_C),
       params_D(ref_D.layout()),
@@ -161,10 +163,11 @@ struct Conv {
   Conv() { }
 
   /// Determines whether kernel satisfies alignment
+  // TODO(klecki): B (window) alignement
     static Status can_implement(
       cutlass::gemm::GemmCoord const & problem_size,
-      typename Mma::IteratorA::TensorRef ref_A,
-      typename Mma::IteratorB::TensorRef ref_B,
+      typename Mma::IteratorA::TensorRef ref_In,
+      // typename Mma::IteratorB::TensorRef ref_B,
       typename Epilogue::OutputTileIterator::TensorRef ref_C,
       typename Epilogue::OutputTileIterator::TensorRef ref_D) {
 
@@ -172,13 +175,13 @@ struct Conv {
     static int const kAlignmentB = Mma::IteratorB::AccessType::kElements;
     static int const kAlignmentC = Epilogue::OutputTileIterator::kElementsPerAccess;
 
-    if (!TensorRef_aligned(ref_A, kAlignmentA)) {
+    if (!TensorRef_aligned(ref_In, kAlignmentA)) {
       return Status::kErrorMisalignedOperand;
     }
 
-    if (!TensorRef_aligned(ref_B, kAlignmentB)) {
-      return Status::kErrorMisalignedOperand;
-    }
+    // if (!TensorRef_aligned(ref_B, kAlignmentB)) {
+    //   return Status::kErrorMisalignedOperand;
+    // }
 
     if (!TensorRef_aligned(ref_C, kAlignmentC)) {
       return Status::kErrorMisalignedOperand;
@@ -189,7 +192,7 @@ struct Conv {
     }
 
     if ((problem_size.m() % kAlignmentA) || (problem_size.k() % kAlignmentA) ||
-      (problem_size.n() % kAlignmentB) || (problem_size.k() % kAlignmentB) ||
+      // (problem_size.n() % kAlignmentB) || (problem_size.k() % kAlignmentB) ||
       (problem_size.m() % kAlignmentC) || (problem_size.n() % kAlignmentC)) {
 
       return Status::kErrorMisalignedOperand;
@@ -254,13 +257,14 @@ struct Conv {
     // Construct iterators to A and B operands
     // Global mem iterators
     typename Mma::IteratorA iterator_A(
-      params.params_A,
-      params.ref_A.data(),
+      params.params_In,
+      params.ref_In.data(),
       {params.problem_size_inner.m(), problem_size_k},
       thread_idx,
       tb_offset_A);
 
 
+    // TODO(klecki): load from  params.windows[1] to window.data()
     // Construct the windows:
     // TensorRef
     auto window = shared_storage.main_loop.operand_Window_ref();
@@ -284,11 +288,12 @@ struct Conv {
     //     printf("window %d: %f\n", i, window.data()[i]);
     //   }
 
-
     typename Mma::IteratorB iterator_B(
-      params.params_B,
+      params.params_Window_inner,
+      // TODO(klecki): passing the "virtual" stride for the iterator as it's params
+      // params.windows[0],
       window.data(),
-      {problem_size_k, params.problem_size_inner.n()}, // TODO(klecki) sizes etc are dummy
+      {problem_size_k, params.problem_size_inner.n()},
       thread_idx,
       tb_offset_B);
 
