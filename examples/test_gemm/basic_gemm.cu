@@ -660,18 +660,18 @@ cudaError_t TestCutlassGemm(int M, int N, int K, A_type alpha, C_type beta) {
   // Test for bit equivalence of results.
   //
 
-  dbg(host_reference);
-  dbg(host_cutlass);
-  std::cout << "CUTLASS A" << std::endl;
-  print_mat(M, K, host_a);
-  std::cout << "CUTLASS B" << std::endl;
-  print_mat(K, N, host_b);
+  // dbg(host_reference);
+  // dbg(host_cutlass);
+  // std::cout << "CUTLASS A" << std::endl;
+  // print_mat(M, K, host_a);
+  // std::cout << "CUTLASS B" << std::endl;
+  // print_mat(K, N, host_b);
 
-  // std::cout << "CUTLASS reference" << std::endl;
-  // print_mat(M, N, host_reference);
+  // // std::cout << "CUTLASS reference" << std::endl;
+  // // print_mat(M, N, host_reference);
 
-  std::cout << "CUTLASS C" << std::endl;
-  print_mat(M, N, host_cutlass, M, N);
+  // std::cout << "CUTLASS C" << std::endl;
+  // print_mat(M, N, host_cutlass, M, N);
   // for (int row = 0; row < M; row++) {
   //   for (int col = 0; col < N; col++) {
   //     if (host_cutlass[row * ldc + col] != host_reference[row * ldc + col]) {
