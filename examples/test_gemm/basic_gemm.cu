@@ -180,11 +180,11 @@ __global__ void InitializeMatrix_kernel(
     // int const k = 16807;
     // int const m = 16;
     // T value = T(((offset + seed) * k % m) - m / 2); // TODO modulo something
-    // T value = row * 100 + col;
+    T value = row * 100 + col;
 
-    T value = 0;
-    if (row == col)
-      value = 1;
+    // T value = 0;
+    // if (row == col)
+    //   value = 1;
 
     matrix[offset] = value;
 
@@ -385,6 +385,87 @@ cudaError_t ReferenceGemm(
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+// from DALI:
+template <typename T>
+__host__ __device__
+std::enable_if_t<std::is_integral<T>::value, T> idx_reflect_101(T idx, T lo, T hi) {
+  if (hi - lo < 2)
+    return hi - 1;  // make it obviously wrong if hi <= lo
+  for (;;) {
+    if (idx < lo)
+      idx = 2 * lo - idx;
+    else if (idx >= hi)
+      idx = 2 * hi - 2 - idx;
+    else
+      break;
+  }
+  return idx;
+}
+
+/// @brief Equivalent to `idx_reflect_101(idx, 0, size)`
+template <typename T>
+__host__ __device__
+std::enable_if_t<std::is_integral<T>::value, T> idx_reflect_101(T idx, T size) {
+  return idx_reflect_101(idx, T(0), size);
+}
+
+/// Naive reference Conv computation.
+__global__ void ReferenceConv_kernel(
+  int M, // rows
+  int N, // cols
+  int radius,
+  float alpha,
+  A_type const *A,
+  int lda,
+  B_type const *window,
+  float beta,
+  C_type *C,
+  int ldc) {
+
+  int row = threadIdx.x + blockIdx.x * blockDim.x;
+  int col = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (row < M && col < N) {
+    C_type accumulator = 0;
+
+    for (int k = -radius; k <= radius; ++k) {
+      accumulator += A[row * lda + idx_reflect_101(col + k, N)] * window[k];
+    }
+
+    C[row * ldc + col] = alpha * accumulator + beta * C[row * ldc + col];
+  }
+}
+
+/// Reference Conv computation.
+cudaError_t ReferenceConv(
+  int M,
+  int N,
+  int radius,
+  float alpha,
+  A_type const *A,
+  int lda,
+  B_type const *window,
+  float beta,
+  C_type *C,
+  int ldc) {
+
+  dim3 block(16, 16);
+  dim3 grid(
+    (M + block.x - 1) / block.x,
+    (N + block.y - 1) / block.y
+  );
+
+  ReferenceConv_kernel<<< grid, block >>>(M, N, radius, alpha, A, lda, window, beta, C, ldc);
+
+  return cudaGetLastError();
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+
 template <typename T>
 void print_mat(int rows, int cols, const std::vector<T> &mat, int max_rows = -1, int max_cols = -1) {
   if (max_rows == -1)
@@ -405,6 +486,10 @@ void print_mat(int rows, int cols, const std::vector<T> &mat, int max_rows = -1,
 /// CUTLASS GEMM kernel.
 cudaError_t TestCutlassGemm(int M, int N, int K, A_type alpha, C_type beta) {
   cudaError_t result;
+
+
+  int window_size = 17;
+  int radius = window_size / 2;
 
   //
   // Define several matrices to be used as operands to GEMM kernels.
@@ -431,6 +516,20 @@ cudaError_t TestCutlassGemm(int M, int N, int K, A_type alpha, C_type beta) {
   //
 
   result = AllocateMatrix(&A, lda, M, K, 0);
+
+  B_type *window;
+  result = cudaMalloc(reinterpret_cast<void **>(&window), sizeof(B_type) * window_size);
+  std::vector<B_type> window_host(window_size, 0);
+  for (int i = 0; i < radius; i++) {
+    window_host[i] = i;
+    window_host[window_size - 1 - i] = i;
+  }
+  window_host[radius] = 100;
+
+  result = cudaMemcpy(window, window_host.data(), sizeof(B_type) * window_size, cudaMemcpyHostToDevice);
+
+
+
 
   if (result !=  cudaSuccess) {
     return result;
@@ -497,7 +596,8 @@ cudaError_t TestCutlassGemm(int M, int N, int K, A_type alpha, C_type beta) {
   //
 
   // Launch reference GEMM
-  result = ReferenceGemm(M, N, K, alpha, A, lda, B, ldb, beta, C_reference, ldc);
+  // result = ReferenceGemm(M, N, K, alpha, A, lda, B, ldb, beta, C_reference, ldc);
+  result = ReferenceConv(M, N, radius, alpha, A, lda, window + radius, beta, C_reference, ldc);
 
   if (result != cudaSuccess) {
     std::cerr << "Reference GEMM kernel failed: "
