@@ -37,6 +37,9 @@
 #include "cutlass/matrix_coord.h"
 #include "cutlass/semaphore.h"
 #include "cutlass/layout/pitch_linear.h"
+#include "cutlass/transform/pitch_linear_thread_map.h"
+#include "cutlass/transform/threadblock/predicated_tile_iterator.h"
+#include "cutlass/transform/threadblock/regular_tile_iterator.h"
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -262,6 +265,65 @@ struct Conv {
       {params.problem_size_inner.m(), problem_size_k},
       thread_idx,
       tb_offset_A);
+
+
+
+    ////////////
+    //  Copy the window from global mem to smem for matrix bulding lookups
+
+    int const kWindowLength = 256;
+    int const kThreads = 256;
+    // The PredicateTileIterator expects PitchLinearShape and PitchLinear layout.
+    // The target shape is RowMajor<1, ConvMmaBase::kWindowLength>, we map it to PitchLinear
+    using WindowShape = layout::PitchLinearShape<kWindowLength, 1>;
+    using WindowLayout = layout::PitchLinear;
+
+    using WindowElement = typename Mma::IteratorB::Element;
+    // using Element = int;
+    // TODO(klecki): this is only defined in some lower layer
+
+    // ThreadMaps define how threads are mapped to a given tile. The PitchLinearStripminedThreadMap
+    // stripmines a pitch-linear tile among a given number of threads, first along the contiguous
+    // dimension then along the strided dimension.
+    using WindowThreadMap = transform::PitchLinearStripminedThreadMap<WindowShape, kThreads>;
+
+    // Define the PredicateTileIterator, using TileShape, Element, Layout, and ThreadMap types
+    using WindowGmemIterator = transform::threadblock::PredicatedTileIterator<
+        WindowShape, WindowElement, WindowLayout, 0, WindowThreadMap>;
+
+    // it's (contiguous, strided)
+    cutlass::Coord<2> window_extent = cutlass::make_Coord(params.window_sizes[1], 1);
+
+    int iterations = (window_extent[0] + WindowShape::kContiguous - 1) / WindowShape::kContiguous;
+
+
+  //
+  // Iterators to write to shared memory
+  //
+  // using WindowLayoutSmem = layout::RowMajor;
+
+  // using WindowThreadMapSmem = transform::PitchLinearStripminedThreadMap<
+  //   layout::PitchLinearShape<Shape::kN, Shape::kK>,
+  //   kThreads,
+  //   kElementsPerAccess
+  // >;
+
+  /// Shared memory iterator to B operand
+  using WindowSmemIterator = transform::threadblock::RegularTileIterator<
+      WindowShape,
+      WindowElement,
+      WindowLayout,
+      0, // contiguous advance
+      WindowThreadMap
+    >;
+
+
+    WindowGmemIterator src_iterator(WindowLayout(window_extent[0]), params.windows[1], window_extent, thread_idx);
+    WindowSmemIterator dst_iterator(shared_storage.main_loop.operand_Window_ref(), thread_idx);
+
+
+
+
 
 
     // TODO(klecki): load from  params.windows[1] to window.data()

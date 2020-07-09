@@ -121,7 +121,8 @@ class ConvMmaBase {
   using TensorRefB = TensorRef<typename Operator::ElementB, typename Operator::LayoutB>;
 
   /// Tensor reference to the B operand
-  using TensorRefWindow = TensorRef<typename Operator::ElementB, layout::RowMajor>;
+  // using TensorRefWindow = TensorRef<typename Operator::ElementB, layout::RowMajor>;
+  using TensorRefWindow = TensorRef<typename Operator::ElementB, layout::PitchLinear>;
 
   static int const kWindowLength = 256; // (todo): klecki some sensible max window size
   // maybe do kWindowLength = kFactor * Shape::kK; so we have some control over that?
@@ -201,9 +202,14 @@ class ConvMmaBase {
     }
 
     /// Returns a layout object for the convolution window
+    // CUTLASS_HOST_DEVICE
+    // static typename layout::RowMajor LayoutWindow() {
+    //   return layout::RowMajor::packed({1, kWindowLength});
+    // }
+
     CUTLASS_HOST_DEVICE
-    static typename layout::RowMajor LayoutWindow() {
-      return layout::RowMajor::packed({1, kWindowLength});
+    static typename layout::PitchLinear LayoutWindow() {
+      return layout::PitchLinear{kWindowLength};
     }
 
     /// Returns a TensorRef to the convolution window
