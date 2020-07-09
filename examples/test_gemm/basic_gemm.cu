@@ -501,7 +501,7 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta) {
   cudaError_t result;
 
 
-  int window_size = 255;
+  int window_size = 17;
   int radius = window_size / 2;
 
   //
@@ -531,18 +531,22 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta) {
   result = AllocateMatrix(&A, lda, M, K, 0);
 
   B_type *window;
-  result = cudaMalloc(reinterpret_cast<void **>(&window), sizeof(B_type) * window_size);
-  std::vector<B_type> window_host(window_size, 0);
+  int max_window = 1024;
+  result = cudaMalloc(reinterpret_cast<void **>(&window), sizeof(B_type) * max_window);
+  std::vector<B_type> window_host(max_window, 0);
   for (int i = 0; i < radius; i++) {
     window_host[i] = i;
     window_host[window_size - 1 - i] = i;
   }
   window_host[radius] = 100;
-  for (int i = 0; i < window_size; i++) {
-    printf("Window[%d] = %f\n", i, window_host[i]);
+  // for (int i = 0; i < window_size; i++) {
+  //   printf("Window[%d] = %f\n", i, window_host[i]);
+  // }
+  for (int i = window_size; i < max_window; i++) {
+    window_host[i] = -42.f;
   }
 
-  result = cudaMemcpy(window, window_host.data(), sizeof(B_type) * window_size, cudaMemcpyHostToDevice);
+  result = cudaMemcpy(window, window_host.data(), sizeof(B_type) * max_window, cudaMemcpyHostToDevice);
 
 
 

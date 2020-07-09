@@ -271,10 +271,10 @@ struct Conv {
     ////////////
     //  Copy the window from global mem to smem for matrix bulding lookups
 
-    int const kWindowLength = kThreadCount;
+    // int const kWindowLength = Mma::SharedStorage::ShapeWindow;
     // The PredicateTileIterator expects PitchLinearShape and PitchLinear layout.
     // The target shape is RowMajor<1, ConvMmaBase::kWindowLength>, we map it to PitchLinear
-    using WindowShape = layout::PitchLinearShape<kWindowLength, 1>;
+    using WindowShape = typename Mma::SharedStorage::ShapeWindow;
     using WindowLayout = layout::PitchLinear;
 
     using WindowElement = typename Mma::IteratorB::Element;
@@ -291,7 +291,9 @@ struct Conv {
         WindowShape, WindowElement, WindowLayout, 0, WindowThreadMap>;
 
     // it's (contiguous, strided)
-    cutlass::Coord<2> window_extent = cutlass::make_Coord(kThreadCount, 1); // TODO??? - why not the actual extent?
+    // TODO(klecki): !!! This works only when the tile is bigger then the extent
+    // I don't know why
+    cutlass::Coord<2> window_extent = cutlass::make_Coord(params.window_sizes[1], 1);
 
     int iterations = (params.window_sizes[1] + WindowShape::kContiguous - 1) / WindowShape::kContiguous;
 
@@ -301,26 +303,22 @@ struct Conv {
   //
   // Iterators to write to shared memory
   /// Shared memory iterator to  Window Smem (we assume the same tile shape)
-  using WindowSmemIterator = transform::threadblock::RegularTileIterator<
-      WindowShape,
-      // MatrixShape<1, kThreadCount>,
-      WindowElement,
-      WindowLayout,
-      // layout::RowMajor,
-      // 1, // contiguous advance (along columns, the second dim)
-      0,
-      WindowThreadMap
-    >;
+      using WindowSmemIterator = transform::threadblock::RegularTileIterator<
+          WindowShape,
+          WindowElement,
+          WindowLayout,
+          0,
+          WindowThreadMap>;
 
+      WindowGmemIterator src_iterator(WindowLayout(params.window_sizes[1]), params.windows[1], window_extent, thread_idx);
+      WindowSmemIterator dst_iterator(shared_storage.main_loop.operand_Window_ref(), thread_idx);
+      __syncthreads();
 
-    WindowGmemIterator src_iterator(WindowLayout(0), params.windows[1], window_extent, thread_idx);
-    WindowSmemIterator dst_iterator(shared_storage.main_loop.operand_Window_ref(), thread_idx);
+      typename WindowGmemIterator::Fragment fragment;
 
-
-    typename WindowGmemIterator::Fragment fragment;
-
-    for(int i = 0; i < fragment.size(); ++i) {
-      fragment[i] = 0;
+      for (int i = 0; i < fragment.size(); ++i)
+      {
+        fragment[i] = 0;
     }
 
     src_iterator.load(fragment);
