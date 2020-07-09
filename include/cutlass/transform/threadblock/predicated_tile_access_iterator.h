@@ -166,7 +166,7 @@ class PredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear,
                                      ThreadMap::Delta::kStrided * LongIndex(stride_) *
                                      sizeof_bits<Element>::value / 8;
 
-      printf("Params constructed: stride_: %d inc_strided_: %ld inc_next_: %ld inc_advance_: %ld\n", stride_, inc_strided_, inc_next_, inc_advance_);
+      // printf("Params constructed: stride_: %d inc_strided_: %ld inc_next_: %ld inc_advance_: %ld\n", stride_, inc_strided_, inc_next_, inc_advance_);
     };
   };
 

@@ -121,10 +121,10 @@ class ConvMmaBase {
   using TensorRefB = TensorRef<typename Operator::ElementB, typename Operator::LayoutB>;
 
   /// Tensor reference to the B operand
-  // using TensorRefWindow = TensorRef<typename Operator::ElementB, layout::RowMajor>;
-  using TensorRefWindow = TensorRef<typename Operator::ElementB, layout::PitchLinear>;
+  using TensorRefWindow = TensorRef<typename Operator::ElementB, layout::RowMajor>;
+  // using TensorRefWindow = TensorRef<typename Operator::ElementB, layout::PitchLinear>;
 
-  static int const kWindowLength = 256; // (todo): klecki some sensible max window size
+  static int const kWindowLength = 1024; // (todo): klecki some sensible max window size
   // maybe do kWindowLength = kFactor * Shape::kK; so we have some control over that?
 
   //
@@ -157,6 +157,7 @@ class ConvMmaBase {
     // now do it as row matrix:
     // we keep the window as K dimension, in fact it's kinda independent kOnstant
     using ShapeWindow = MatrixShape<1, kWindowLength>;
+    // using ShapeWindow = layout::PitchLinearShape<kWindowLength, 1>;
    public:
     //
     // Data members
@@ -202,15 +203,15 @@ class ConvMmaBase {
     }
 
     /// Returns a layout object for the convolution window
-    // CUTLASS_HOST_DEVICE
-    // static typename layout::RowMajor LayoutWindow() {
-    //   return layout::RowMajor::packed({1, kWindowLength});
-    // }
-
     CUTLASS_HOST_DEVICE
-    static typename layout::PitchLinear LayoutWindow() {
-      return layout::PitchLinear{kWindowLength};
+    static typename layout::RowMajor LayoutWindow() {
+      return layout::RowMajor::packed({1, kWindowLength});
     }
+
+    // CUTLASS_HOST_DEVICE
+    // static typename layout::PitchLinear LayoutWindow() {
+    //   return layout::PitchLinear{ShapeWindow::kContiguous};
+    // }
 
     /// Returns a TensorRef to the convolution window
     CUTLASS_HOST_DEVICE

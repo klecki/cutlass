@@ -83,11 +83,11 @@ cudaError_t CutlassSgemmNN(
   int M,
   int N,
   int K,
+  int window_size,
   A_type alpha,
   A_type const *A,
   int lda,
-  B_type const *B,
-  int ldb,
+  B_type const *window,
   C_type beta,
   C_type *C,
   int ldc) {
@@ -120,9 +120,6 @@ cudaError_t CutlassSgemmNN(
   // Define a CUTLASS GEMM type
   CutlassConv gemm_operator;
 
-
-  int window_size = 17;
-
   // Construct the CUTLASS GEMM arguments object.
   //
   // One of CUTLASS's design patterns is to define gemm argument objects that are constructible
@@ -141,7 +138,7 @@ cudaError_t CutlassSgemmNN(
   cutlass::Array<float *, 2> windows;
   for (int i = 0; i < 2; i++) {
     window_sizes[i] = window_size;
-    windows[i] = const_cast<B_type*>(B); // TODO(klecki): passing non-const value, cause CUTLASS is using non-const refs due to RW iterators (even when only reading)
+    windows[i] = const_cast<B_type*>(window); // TODO(klecki): passing non-const value, cause CUTLASS is using non-const refs due to RW iterators (even when only reading)
   }
   CutlassConv::Arguments args(size,  // Input matrix dimensions
                               window_sizes, // Window sizes
@@ -504,7 +501,7 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta) {
   cudaError_t result;
 
 
-  int window_size = 17;
+  int window_size = 255;
   int radius = window_size / 2;
 
   //
@@ -541,6 +538,9 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta) {
     window_host[window_size - 1 - i] = i;
   }
   window_host[radius] = 100;
+  for (int i = 0; i < window_size; i++) {
+    printf("Window[%d] = %f\n", i, window_host[i]);
+  }
 
   result = cudaMemcpy(window, window_host.data(), sizeof(B_type) * window_size, cudaMemcpyHostToDevice);
 
@@ -593,7 +593,7 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta) {
   // Launch CUTLASS GEMM.
   //
 
-  result = CutlassSgemmNN(M, N, K, alpha, A, lda, B, ldb, beta, C_cutlass, ldc);
+  result = CutlassSgemmNN(M, N, K, window_size, alpha, A, lda, window, beta, C_cutlass, ldc);
 
   if (result != cudaSuccess) {
     std::cerr << "CUTLASS GEMM kernel failed: "

@@ -271,8 +271,7 @@ struct Conv {
     ////////////
     //  Copy the window from global mem to smem for matrix bulding lookups
 
-    int const kWindowLength = 256;
-    int const kThreads = 256;
+    int const kWindowLength = kThreadCount;
     // The PredicateTileIterator expects PitchLinearShape and PitchLinear layout.
     // The target shape is RowMajor<1, ConvMmaBase::kWindowLength>, we map it to PitchLinear
     using WindowShape = layout::PitchLinearShape<kWindowLength, 1>;
@@ -285,44 +284,67 @@ struct Conv {
     // ThreadMaps define how threads are mapped to a given tile. The PitchLinearStripminedThreadMap
     // stripmines a pitch-linear tile among a given number of threads, first along the contiguous
     // dimension then along the strided dimension.
-    using WindowThreadMap = transform::PitchLinearStripminedThreadMap<WindowShape, kThreads>;
+    using WindowThreadMap = transform::PitchLinearStripminedThreadMap<WindowShape, kThreadCount>;
 
     // Define the PredicateTileIterator, using TileShape, Element, Layout, and ThreadMap types
     using WindowGmemIterator = transform::threadblock::PredicatedTileIterator<
         WindowShape, WindowElement, WindowLayout, 0, WindowThreadMap>;
 
     // it's (contiguous, strided)
-    cutlass::Coord<2> window_extent = cutlass::make_Coord(params.window_sizes[1], 1);
+    cutlass::Coord<2> window_extent = cutlass::make_Coord(params.window_sizes[1] + 1, 1);
 
     int iterations = (window_extent[0] + WindowShape::kContiguous - 1) / WindowShape::kContiguous;
 
+    PRINT_IF
+      printf(">>> Loading iterations: %d\n", iterations);
 
   //
   // Iterators to write to shared memory
-  //
-  // using WindowLayoutSmem = layout::RowMajor;
-
-  // using WindowThreadMapSmem = transform::PitchLinearStripminedThreadMap<
-  //   layout::PitchLinearShape<Shape::kN, Shape::kK>,
-  //   kThreads,
-  //   kElementsPerAccess
-  // >;
-
-  /// Shared memory iterator to B operand
+  /// Shared memory iterator to  Window Smem (we assume the same tile shape)
   using WindowSmemIterator = transform::threadblock::RegularTileIterator<
-      WindowShape,
+      // WindowShape,
+      MatrixShape<1, kThreadCount>,
       WindowElement,
-      WindowLayout,
-      0, // contiguous advance
+      // WindowLayout,
+      layout::RowMajor,
+      1, // contiguous advance (along columns, the second dim)
       WindowThreadMap
     >;
 
 
-    WindowGmemIterator src_iterator(WindowLayout(window_extent[0]), params.windows[1], window_extent, thread_idx);
+    WindowGmemIterator src_iterator(WindowLayout(0), params.windows[1], window_extent, thread_idx);
     WindowSmemIterator dst_iterator(shared_storage.main_loop.operand_Window_ref(), thread_idx);
 
 
+    typename WindowGmemIterator::Fragment fragment;
 
+    for(int i = 0; i < fragment.size(); ++i) {
+      fragment[i] = 0;
+    }
+
+    src_iterator.load(fragment);
+    for(int i = 0; i < fragment.size(); ++i) {
+      printf("Tid: %d, frag: %d, %f\n", threadIdx.x, i, fragment[i]);
+    }
+    dst_iterator.store(fragment);
+
+    src_iterator.clear_mask();
+
+    ++src_iterator;
+    ++dst_iterator;
+
+    for(; iterations > 1; --iterations) {
+
+      src_iterator.load(fragment);
+      for(int i = 0; i < fragment.size(); ++i) {
+        printf("Tid: %d, frag: %d, it: %d, %f\n", threadIdx.x, i, iterations, fragment[i]);
+      }
+      dst_iterator.store(fragment);
+
+      ++src_iterator;
+      ++dst_iterator;
+    }
+    __syncthreads();
 
 
 
@@ -333,22 +355,22 @@ struct Conv {
 
     // TODO(klecki):
     // eithere compute the window directly in SMEM or get it from GMEM
-    int window_size = 17;
-    int radius = window_size / 2;
-    for (int i = thread_idx; i < window_size; i++) {
-      if (i < radius) {
-        window.data()[i] = i;
-      } else if (i > radius) {
-        window.data()[i] = window_size - 1 - i;
-      } else {
-        window.data()[i] = 100;
-      }
-    }
-    __syncthreads();
-    // PRINT_IF
-    //   for (int i = 0; i < 256; i++) {
-    //     printf("window %d: %f\n", i, window.data()[i]);
+    // int window_size = 17;
+    // int radius = window_size / 2;
+    // for (int i = thread_idx; i < window_size; i++) {
+    //   if (i < radius) {
+    //     window.data()[i] = i;
+    //   } else if (i > radius) {
+    //     window.data()[i] = window_size - 1 - i;
+    //   } else {
+    //     window.data()[i] = 100;
     //   }
+    // }
+    // __syncthreads();
+    PRINT_IF
+      for (int i = 0; i < params.window_sizes[1]; i++) {
+        printf("window %d: %f %f\n", i, params.windows[1][i], window.data()[i]);
+      }
 
     typename Mma::IteratorB iterator_B(
       params.params_Window_inner,
