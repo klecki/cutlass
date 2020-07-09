@@ -291,9 +291,9 @@ struct Conv {
         WindowShape, WindowElement, WindowLayout, 0, WindowThreadMap>;
 
     // it's (contiguous, strided)
-    cutlass::Coord<2> window_extent = cutlass::make_Coord(params.window_sizes[1] + 1, 1);
+    cutlass::Coord<2> window_extent = cutlass::make_Coord(kThreadCount, 1); // TODO??? - why not the actual extent?
 
-    int iterations = (window_extent[0] + WindowShape::kContiguous - 1) / WindowShape::kContiguous;
+    int iterations = (params.window_sizes[1] + WindowShape::kContiguous - 1) / WindowShape::kContiguous;
 
     PRINT_IF
       printf(">>> Loading iterations: %d\n", iterations);
@@ -328,7 +328,7 @@ struct Conv {
     }
     dst_iterator.store(fragment);
 
-    src_iterator.clear_mask();
+    // src_iterator.clear_mask();
 
     ++src_iterator;
     ++dst_iterator;
