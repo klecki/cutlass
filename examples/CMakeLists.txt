@@ -71,6 +71,7 @@ foreach(EXAMPLE
   # 11_planar_complex_array
   # 12_gemm_bias_relu
   # 13_fused_two_gemms
+  04_tile_iterator_broken
   test_gemm
 )
 
