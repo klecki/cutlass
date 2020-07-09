@@ -302,12 +302,13 @@ struct Conv {
   // Iterators to write to shared memory
   /// Shared memory iterator to  Window Smem (we assume the same tile shape)
   using WindowSmemIterator = transform::threadblock::RegularTileIterator<
-      // WindowShape,
-      MatrixShape<1, kThreadCount>,
+      WindowShape,
+      // MatrixShape<1, kThreadCount>,
       WindowElement,
-      // WindowLayout,
-      layout::RowMajor,
-      1, // contiguous advance (along columns, the second dim)
+      WindowLayout,
+      // layout::RowMajor,
+      // 1, // contiguous advance (along columns, the second dim)
+      0,
       WindowThreadMap
     >;
 
