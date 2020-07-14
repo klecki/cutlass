@@ -74,6 +74,8 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 
+static constexpr int kWindowSize = 19;
+
 using A_type = float;
 using B_type = float;
 using C_type = float;
@@ -224,7 +226,7 @@ __global__ void InitializeMatrix_kernel_col_invariant(
     // T value = T(((col + seed) * k % m) - m / 2); // TODO modulo something
     int diag_dist = row - col;
     T value = 0;
-    int window_size = 17;
+    int window_size = kWindowSize;
     int radius = window_size / 2;
     if (diag_dist == 0) {
       value = 100;
@@ -501,7 +503,7 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta) {
   cudaError_t result;
 
 
-  int window_size = 250;
+  int window_size = kWindowSize;
   int radius = window_size / 2;
 
   //
@@ -682,16 +684,16 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta) {
 
   // dbg(host_reference);
   // dbg(host_cutlass);
-  // std::cout << "CUTLASS A" << std::endl;
-  // print_mat(M, K, host_a);
-  // std::cout << "CUTLASS B" << std::endl;
-  // print_mat(K, N, host_b);
+  std::cout << "CUTLASS A" << std::endl;
+  print_mat(M, K, host_a);
+  std::cout << "CUTLASS B" << std::endl;
+  print_mat(K, N, host_b);
 
   // // std::cout << "CUTLASS reference" << std::endl;
   // // print_mat(M, N, host_reference);
 
-  // std::cout << "CUTLASS C" << std::endl;
-  // print_mat(M, N, host_cutlass, M, N);
+  std::cout << "CUTLASS C" << std::endl;
+  print_mat(M, N, host_cutlass, M, N);
   // for (int row = 0; row < M; row++) {
   //   for (int col = 0; col < N; col++) {
   //     if (host_cutlass[row * ldc + col] != host_reference[row * ldc + col]) {

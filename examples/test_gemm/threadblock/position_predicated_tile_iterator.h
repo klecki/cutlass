@@ -218,6 +218,8 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
   /// Data member to the tile access iterator
   TileAccessIterator address_iterator_;
   Pointer pointer_;
+  int window_size_;
+  int channels_ = 1;
 
  public:
   /// Constructs a TileIterator from its precomputed state, threadblock offset,
@@ -233,9 +235,11 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
       /// ID of each participating thread
       int thread_id,
       /// Initial offset of threadblock
-      TensorCoord const &threadblock_offset)
+      TensorCoord const &threadblock_offset,
+      int window_size, int channels = 1)
       : address_iterator_(params.params_, pointer, extent, thread_id,
-                          threadblock_offset), pointer_(pointer) {
+                          threadblock_offset), pointer_(pointer), window_size_(window_size),
+                          channels_(channels) {
     PRINT_IF
       printf("PositionPredicatedTileIterator ThreadMap::Iterations::kCount: %d ThreadMap::kElementsPerAccess: %d\n", ThreadMap::Iterations::kCount, ThreadMap::kElementsPerAccess);
   }
@@ -249,7 +253,7 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
       int thread_id          ///< ID of each participating thread
       )
       : PositionPredicatedTileIterator(params, pointer, extent, thread_id,
-                               make_Coord(0, 0)) {}
+                               make_Coord(0, 0), 0) {}
 
   /// Adds a pointer offset in units of Element
   CUTLASS_HOST_DEVICE
@@ -344,13 +348,11 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
           // do a switch over channels, so we divide by constant almost everytime
           // TODO(klecki)
           //todo: pack as function:
-          int channels = 1;
-          int window_element = diag_dist / channels;
-          int window_size = 17;
-          int radius = window_size / 2;
-          // element is used if it's our channel (we're multiple of `channels` from diagonal)
+          int window_element = diag_dist / channels_;
+          int radius = window_size_ / 2;
+          // element is used if it's our channel (we're multiple of `channels_` from diagonal)
           // and we still fit in the window
-          bool is_used = (::abs(window_element) <= radius) && (window_element * channels == diag_dist);
+          bool is_used = (::abs(window_element) <= radius) && (window_element * channels_ == diag_dist);
 
           // PRINT_IF
           // for (int i = 0; i < 256; i++) {
@@ -759,24 +761,28 @@ public:
     Pointer pointer,                              ///< Pointer to start of tensor
     TensorCoord extent,                           ///< Extent of tensor
     int thread_id,                                ///< ID of each participating thread
-    TensorCoord const &threadblock_offset         ///< Initial offset of threadblock
+    TensorCoord const &threadblock_offset,        ///< Initial offset of threadblock
+    int window_size,                              ///< window size to be sampled
+    int channels = 1
   ):
     iterator_(
       params.params_,
       pointer,
       layout::PitchLinearCoord(extent.column(), extent.row()),
       thread_id,
-      layout::PitchLinearCoord(threadblock_offset.column(), threadblock_offset.row())
+      layout::PitchLinearCoord(threadblock_offset.column(), threadblock_offset.row()),
+      window_size,
+      channels
     ) { }
 
   /// Construct a PositionPredicatedTileIterator with zero threadblock offset
-  CUTLASS_HOST_DEVICE
-  PositionPredicatedTileIterator(
-    Params const &params,                         ///< Precomputed parameters object
-    Pointer pointer,                              ///< Pointer to start of tensor
-    TensorCoord extent,                           ///< Extent of tensor
-    int thread_id                                 ///< ID of each participating thread
-  ): PositionPredicatedTileIterator(params, pointer, extent, thread_id, make_Coord(0, 0)) { }
+  // CUTLASS_HOST_DEVICE
+  // PositionPredicatedTileIterator(
+  //   Params const &params,                         ///< Precomputed parameters object
+  //   Pointer pointer,                              ///< Pointer to start of tensor
+  //   TensorCoord extent,                           ///< Extent of tensor
+  //   int thread_id                                 ///< ID of each participating thread
+  // ): PositionPredicatedTileIterator(params, pointer, extent, thread_id, make_Coord(0, 0)) { }
 
   /// Adds a pointer offset in units of Element
   CUTLASS_HOST_DEVICE

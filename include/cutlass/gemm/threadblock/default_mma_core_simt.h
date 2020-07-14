@@ -159,8 +159,8 @@ struct DefaultMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
 
   /// Shared memory iterator to A operand
   using SmemIteratorA = transform::threadblock::RegularTileIterator<
-    MatrixShape<Shape::kM, Shape::kK>, 
-    ElementA, 
+    MatrixShape<Shape::kM, Shape::kK>,
+    ElementA,
     SmemLayoutA,
     1,
     IteratorThreadMapA
@@ -175,8 +175,8 @@ struct DefaultMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
 
   /// Shared memory iterator to B operand
   using SmemIteratorB = transform::threadblock::RegularTileIterator<
-    MatrixShape<Shape::kK, Shape::kN>, 
-    ElementB, 
+    MatrixShape<Shape::kK, Shape::kN>,
+    ElementB,
     SmemLayoutB,
     0,
     IteratorThreadMapB
@@ -292,7 +292,7 @@ struct DefaultMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
 
   /// Number of threads total
   static int const kThreads = WarpCount::kCount * kWarpSize;
-  
+
   static int const kElementsPerAccess = 1;
 
   //
@@ -318,8 +318,8 @@ struct DefaultMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
 
   /// Shared memory iterator to A operand
   using SmemIteratorA = transform::threadblock::RegularTileIterator<
-    MatrixShape<Shape::kM, Shape::kK>, 
-    ElementA, 
+    MatrixShape<Shape::kM, Shape::kK>,
+    ElementA,
     SmemLayoutA,
     1,
     SmemThreadMapA // was IteratorThreadMapA
@@ -337,8 +337,8 @@ struct DefaultMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
 
   /// Shared memory iterator to B operand
   using SmemIteratorB = transform::threadblock::RegularTileIterator<
-    MatrixShape<Shape::kK, Shape::kN>, 
-    ElementB, 
+    MatrixShape<Shape::kK, Shape::kN>,
+    ElementB,
     SmemLayoutB,
     0,
     SmemThreadMapB // was IteratorThreadMapA
@@ -386,7 +386,7 @@ struct DefaultMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
       Policy          /// Policy describing warp-level MmaSimtOp (concept: MmaSimtOp policy)
   >;
 
-  /// Policy used to define MmaPipelined 
+  /// Policy used to define MmaPipelined
   using MmaPolicy = MmaPolicy<
     MmaWarpSimt,
     MatrixShape<kPaddingN, 0>,    // skew for A matrix to avoid SMEM bank conflicts
@@ -484,8 +484,8 @@ struct DefaultMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
 
   /// Shared memory iterator to A operand
   using SmemIteratorA = transform::threadblock::RegularTileIterator<
-    MatrixShape<Shape::kM, Shape::kK>, 
-    ElementA, 
+    MatrixShape<Shape::kM, Shape::kK>,
+    ElementA,
     SmemLayoutA,
     1,
     SmemThreadMapA
@@ -500,8 +500,8 @@ struct DefaultMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
 
   /// Shared memory iterator to B operand
   using SmemIteratorB = transform::threadblock::RegularTileIterator<
-    MatrixShape<Shape::kK, Shape::kN>, 
-    ElementB, 
+    MatrixShape<Shape::kK, Shape::kN>,
+    ElementB,
     SmemLayoutB,
     0,
     IteratorThreadMapB
@@ -548,7 +548,7 @@ struct DefaultMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
       Policy        /// Policy describing warp-level MmaSimtOp (concept: MmaSimtOp policy)
   >;
 
-  /// Policy used to define MmaPipelined 
+  /// Policy used to define MmaPipelined
   using MmaPolicy = MmaPolicy<
     MmaWarpSimt,
     MatrixShape<kPaddingM, 0>,    // skew for A matrix to avoid SMEM bank conflicts
@@ -643,7 +643,7 @@ struct DefaultMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
 
   /// Shared memory iterator to A operand
   using SmemIteratorA = transform::threadblock::RegularTileIterator<
-    MatrixShape<Shape::kM, Shape::kK>, 
+    MatrixShape<Shape::kM, Shape::kK>,
     ElementA,
     SmemLayoutA,
     1,
@@ -662,7 +662,7 @@ struct DefaultMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
 
   /// Shared memory iterator to B operand
   using SmemIteratorB = transform::threadblock::RegularTileIterator<
-    MatrixShape<Shape::kK, Shape::kN>, 
+    MatrixShape<Shape::kK, Shape::kN>,
     ElementB,
     SmemLayoutB,
     0,
@@ -710,7 +710,7 @@ struct DefaultMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 1>, ElementA_,
       Policy        /// Policy describing warp-level MmaSimtOp (concept: MmaSimtOp policy)
   >;
 
-  /// Policy used to define MmaPipelined 
+  /// Policy used to define MmaPipelined
   using MmaPolicy = MmaPolicy<
     MmaWarpSimt,
     MatrixShape<0, 0>,
@@ -800,13 +800,13 @@ struct DefaultMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 4>, int8_t,
 
   /// Shared memory iterator to A operand
   using SmemIteratorA = transform::threadblock::RegularTileIterator2dThreadTile<
-    MatrixShape<Shape::kM, Shape::kK>, 
-    ElementA, 
+    MatrixShape<Shape::kM, Shape::kK>,
+    ElementA,
     SmemLayoutA,
     1,
     IteratorThreadMapA
   >;
-  
+
 
   /// Policy of iterator B
   using IteratorThreadMapB = transform::PitchLinear2DThreadTileStripminedThreadMap<
@@ -817,8 +817,8 @@ struct DefaultMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 4>, int8_t,
 
   /// Shared memory iterator to B operand
   using SmemIteratorB = transform::threadblock::RegularTileIterator2dThreadTile<
-    MatrixShape<Shape::kK, Shape::kN>, 
-    ElementB, 
+    MatrixShape<Shape::kK, Shape::kN>,
+    ElementB,
     SmemLayoutB,
     0,
     IteratorThreadMapB
@@ -957,13 +957,13 @@ struct DefaultMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 4>, int8_t,
 
   /// Shared memory iterator to A operand
   using SmemIteratorA = transform::threadblock::RegularTileIterator2dThreadTile<
-    MatrixShape<Shape::kM, Shape::kK>, 
-    ElementA, 
+    MatrixShape<Shape::kM, Shape::kK>,
+    ElementA,
     SmemLayoutA,
     1,
     SmemThreadMapA
   >;
-  
+
 
   /// Policy of iterator B
   using IteratorThreadMapB = transform::PitchLinear2DThreadTileStripminedThreadMap<
@@ -977,8 +977,8 @@ struct DefaultMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 4>, int8_t,
 
   /// Shared memory iterator to B operand
   using SmemIteratorB = transform::threadblock::RegularTileIterator2dThreadTile<
-    MatrixShape<Shape::kK, Shape::kN>, 
-    ElementB, 
+    MatrixShape<Shape::kK, Shape::kN>,
+    ElementB,
     SmemLayoutB,
     0,
     SmemThreadMapB
@@ -1120,13 +1120,13 @@ struct DefaultMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 4>, int8_t,
 
   /// Shared memory iterator to A operand
   using SmemIteratorA = transform::threadblock::RegularTileIterator2dThreadTile<
-    MatrixShape<Shape::kM, Shape::kK>, 
-    ElementA, 
+    MatrixShape<Shape::kM, Shape::kK>,
+    ElementA,
     SmemLayoutA,
     1,
     SmemThreadMapA
   >;
-  
+
   /// Policy of iterator B
   using IteratorThreadMapB = transform::PitchLinear2DThreadTileStripminedThreadMap<
     layout::PitchLinearShape<Shape::kN, Shape::kK>,
@@ -1136,8 +1136,8 @@ struct DefaultMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 4>, int8_t,
 
   /// Shared memory iterator to B operand
   using SmemIteratorB = transform::threadblock::RegularTileIterator2dThreadTile<
-    MatrixShape<Shape::kK, Shape::kN>, 
-    ElementB, 
+    MatrixShape<Shape::kK, Shape::kN>,
+    ElementB,
     SmemLayoutB,
     0,
     IteratorThreadMapB
@@ -1276,13 +1276,13 @@ struct DefaultMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 4>, int8_t,
 
   /// Shared memory iterator to A operand
   using SmemIteratorA = transform::threadblock::RegularTileIterator2dThreadTile<
-    MatrixShape<Shape::kM, Shape::kK>, 
-    ElementA, 
+    MatrixShape<Shape::kM, Shape::kK>,
+    ElementA,
     SmemLayoutA,
     1,
     IteratorThreadMapA
   >;
-  
+
 
   /// Policy of iterator B
   using IteratorThreadMapB = transform::PitchLinear2DThreadTileStripminedThreadMap<
@@ -1296,8 +1296,8 @@ struct DefaultMmaCore<Shape_, WarpShape_, GemmShape<1, 1, 4>, int8_t,
 
   /// Shared memory iterator to B operand
   using SmemIteratorB = transform::threadblock::RegularTileIterator2dThreadTile<
-    MatrixShape<Shape::kK, Shape::kN>, 
-    ElementB, 
+    MatrixShape<Shape::kK, Shape::kN>,
+    ElementB,
     SmemLayoutB,
     0,
     SmemThreadMapB

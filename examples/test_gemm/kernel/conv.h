@@ -266,7 +266,9 @@ struct Conv {
       thread_idx,
       tb_offset_A);
 
-
+    /************************
+     * THIS DOESN'T WORK AS INTENDED
+     * need to adjust how the tiles are written to the smem
 
     ////////////
     //  Copy the window from global mem to smem for matrix bulding lookups
@@ -350,39 +352,34 @@ struct Conv {
     __syncthreads();
 
 
+  */
 
-    // TODO(klecki): load from  params.windows[1] to window.data()
+
+    // Load from  params.windows[1] to window.data()
     // Construct the windows:
     // TensorRef
     auto window = shared_storage.main_loop.operand_Window_ref(params.window_sizes[1]);
 
     // TODO(klecki):
-    // eithere compute the window directly in SMEM or get it from GMEM
-    // int window_size = 17;
-    // int radius = window_size / 2;
-    // for (int i = thread_idx; i < window_size; i++) {
-    //   if (i < radius) {
-    //     window.data()[i] = i;
-    //   } else if (i > radius) {
-    //     window.data()[i] = window_size - 1 - i;
-    //   } else {
-    //     window.data()[i] = 100;
-    //   }
-    // }
-    // __syncthreads();
-    PRINT_IF
-      for (int i = 0; i < 512; i++) {
-        printf("window %d: %f %f\n", i, params.windows[1][i], window.data()[i]);
-      }
+    // either compute the window directly in SMEM or get it from GMEM
+
+    for (int i = thread_idx; i < params.window_sizes[1]; i += kThreadCount) {
+      window.data()[i] = params.windows[1][i];
+    }
+    __syncthreads();
+
 
     typename Mma::IteratorB iterator_B(
+      // Fake stride
       params.params_Window_inner,
-      // TODO(klecki): passing the "virtual" stride for the iterator as it's params
-      // params.windows[0],
+      // Pointer to the smem that would be sampled
       window.data(),
+      // Emulated matrix shape
       {problem_size_k, params.problem_size_inner.n()},
       thread_idx,
-      tb_offset_B);
+      tb_offset_B,
+      // size of the window used
+      params.window_sizes[1]);
 
     // Broadcast the warp_id computed by lane 0 to ensure dependent code
     // is compiled as warp-uniform.

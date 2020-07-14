@@ -132,7 +132,7 @@ public:
 
     int ldm;                     // leading dimension
     layout::Matrix kind;         // Could be layout::Matrix::kRowMajor or layout::Matrix::kColumnMajor
-    
+
 
     TensorRef<int, layout::ContiguousMatrix> E(ptr_E, {ldm, kind});
 
@@ -209,7 +209,7 @@ class TensorRef {
     Layout const &layout = Layout()           ///< layout object containing stride and mapping function
   ):
     ptr_(ptr), layout_(layout) {
-  
+
   }
 
   /// Converting constructor from TensorRef to non-constant data.
