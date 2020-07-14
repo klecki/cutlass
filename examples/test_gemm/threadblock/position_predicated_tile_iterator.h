@@ -371,9 +371,6 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
             int neg_element = window_element;
             while (true) {
               neg_element += 2 * dist_up;
-              if (neg_element >= 0) {
-                printf("+++++++++++++++++++++++++++ ERROR +++++++++++++++ %d: %d\n", threadIdx.x, neg_element);
-              }
               if (-neg_element <= radius) {
                 if (dist_up != 0)
                   frag_ptr[idx] += *(pointer_ + radius + neg_element);
