@@ -266,12 +266,14 @@ struct Conv {
       thread_idx,
       tb_offset_A);
 
-    /************************
-     * THIS DOESN'T WORK AS INTENDED
-     * need to adjust how the tiles are written to the smem
 
     ////////////
     //  Copy the window from global mem to smem for matrix bulding lookups
+
+    // Load from  params.windows[1] to window.data()
+    // Construct the windows:
+    // TensorRef
+    auto window = shared_storage.main_loop.operand_Window_ref(params.window_sizes[1]);
 
     // int const kWindowLength = Mma::SharedStorage::ShapeWindow;
     // The PredicateTileIterator expects PitchLinearShape and PitchLinear layout.
@@ -317,7 +319,8 @@ struct Conv {
           WindowShape, WindowElement, WindowLayout, 0, WindowThreadMap>;
 
       WindowGmemIterator src_iterator(WindowLayout(1024), params.windows[1], window_extent, thread_idx);
-      WindowSmemIterator dst_iterator(shared_storage.main_loop.operand_Window_ref(1024), thread_idx);
+      // WindowSmemIterator dst_iterator(shared_storage.main_loop.operand_Window_ref(1024), thread_idx);
+      WindowGmemIterator dst_iterator(WindowLayout(1024), window.data(), window_extent, thread_idx);
       // dst_iterator.set_iteration_index(iterations);
 
       typename WindowGmemIterator::Fragment fragment;
@@ -352,21 +355,14 @@ struct Conv {
     __syncthreads();
 
 
-  */
-
-
-    // Load from  params.windows[1] to window.data()
-    // Construct the windows:
-    // TensorRef
-    auto window = shared_storage.main_loop.operand_Window_ref(params.window_sizes[1]);
 
     // TODO(klecki):
     // either compute the window directly in SMEM or get it from GMEM
 
-    for (int i = thread_idx; i < params.window_sizes[1]; i += kThreadCount) {
-      window.data()[i] = params.windows[1][i];
-    }
-    __syncthreads();
+    // for (int i = thread_idx; i < params.window_sizes[1]; i += kThreadCount) {
+    //   window.data()[i] = params.windows[1][i];
+    // }
+    // __syncthreads();
 
 
     typename Mma::IteratorB iterator_B(
