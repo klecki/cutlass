@@ -74,7 +74,7 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 
-static constexpr int kWindowSize = 19;
+static constexpr int kWindowSize = 65;
 
 using A_type = float;
 using B_type = float;
@@ -195,11 +195,11 @@ __global__ void InitializeMatrix_kernel(
     // int const k = 16807;
     // int const m = 16;
     // T value = T(((offset + seed) * k % m) - m / 2); // TODO modulo something
-    T value = row * 100 + col;
+    // T value = row * 100 + col;
 
-    // T value = 0;
-    // if (row == col)
-    //   value = 1;
+    T value = 0;
+    if (row == col)
+      value = 1;
 
     matrix[offset] = value;
 
@@ -689,19 +689,19 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta) {
   std::cout << "CUTLASS B" << std::endl;
   print_mat(K, N, host_b);
 
-  // // std::cout << "CUTLASS reference" << std::endl;
-  // // print_mat(M, N, host_reference);
+  std::cout << "CUTLASS reference" << std::endl;
+  print_mat(M, N, host_reference);
 
   std::cout << "CUTLASS C" << std::endl;
   print_mat(M, N, host_cutlass, M, N);
-  // for (int row = 0; row < M; row++) {
-  //   for (int col = 0; col < N; col++) {
-  //     if (host_cutlass[row * ldc + col] != host_reference[row * ldc + col]) {
-  //       std::cerr << "CUTLASS results incorrect: (" << row << ", " << col << "): "
-  //         << host_cutlass[row * ldc + col] << " != " << host_reference[row * ldc + col] << std::endl;
-  //     }
-  //   }
-  // }
+  for (int row = 0; row < M; row++) {
+    for (int col = 0; col < N; col++) {
+      if (host_cutlass[row * ldc + col] != host_reference[row * ldc + col]) {
+        std::cerr << "CUTLASS results incorrect: (" << row << ", " << col << "): "
+          << host_cutlass[row * ldc + col] << " != " << host_reference[row * ldc + col] << std::endl;
+      }
+    }
+  }
   if (host_cutlass != host_reference) {
     std::cerr << "CUTLASS results incorrect." << std::endl;
 

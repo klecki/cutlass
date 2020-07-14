@@ -371,14 +371,19 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
             int neg_element = window_element;
             while (true) {
               neg_element += 2 * dist_up;
-              if (-neg_element <= radius && dist_up != 0) {
-                frag_ptr[idx] += *(pointer_ + radius + neg_element);
+              if (neg_element >= 0) {
+                printf("+++++++++++++++++++++++++++ ERROR +++++++++++++++ %d: %d\n", threadIdx.x, neg_element);
+              }
+              if (-neg_element <= radius) {
+                if (dist_up != 0)
+                  frag_ptr[idx] += *(pointer_ + radius + neg_element);
               } else {
                 break;
               }
               neg_element -= 2 * dist_down;
               if (-neg_element <= radius) {
-                frag_ptr[idx] += *(pointer_ + radius + neg_element);
+                if (dist_down != 0)
+                  frag_ptr[idx] += *(pointer_ + radius + neg_element);
               } else {
                 break;
               }
@@ -387,13 +392,15 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
             int pos_element = window_element;
             while (true) {
               pos_element += 2 * dist_down;
-              if (pos_element <= radius && dist_down != 0) {
-                frag_ptr[idx] += *(pointer_ + radius + pos_element);
+              if (pos_element <= radius) {
+                if (dist_down != 0)
+                  frag_ptr[idx] += *(pointer_ + radius + pos_element);
               } else {
                 break;
               }
               pos_element -= 2 * dist_up;
               if (pos_element <= radius) {
+                if (dist_up != 0)
                 frag_ptr[idx] += *(pointer_ + radius + pos_element);
               } else {
                 break;
