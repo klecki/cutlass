@@ -209,14 +209,14 @@ class ConvMmaBase {
     // }
 
     CUTLASS_HOST_DEVICE
-    static typename layout::PitchLinear LayoutWindow() {
-      return layout::PitchLinear{ShapeWindow::kContiguous};
+    static typename layout::PitchLinear LayoutWindow(int required_len) {
+      return layout::PitchLinear{required_len};
     }
 
     /// Returns a TensorRef to the convolution window
     CUTLASS_HOST_DEVICE
-    TensorRefWindow operand_Window_ref() {
-      return TensorRefWindow{operand_Window.data(), LayoutWindow()};
+    TensorRefWindow operand_Window_ref(int required_len) {
+      return TensorRefWindow{operand_Window.data(), LayoutWindow(required_len)};
     }
 
 

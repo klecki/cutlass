@@ -501,7 +501,7 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta) {
   cudaError_t result;
 
 
-  int window_size = 17;
+  int window_size = 250;
   int radius = window_size / 2;
 
   //

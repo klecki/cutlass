@@ -274,7 +274,8 @@ struct Conv {
     // int const kWindowLength = Mma::SharedStorage::ShapeWindow;
     // The PredicateTileIterator expects PitchLinearShape and PitchLinear layout.
     // The target shape is RowMajor<1, ConvMmaBase::kWindowLength>, we map it to PitchLinear
-    using WindowShape = typename Mma::SharedStorage::ShapeWindow;
+    // using WindowShape = typename Mma::SharedStorage::ShapeWindow;
+    using WindowShape = layout::PitchLinearShape<kThreadCount, 1>;
     using WindowLayout = layout::PitchLinear;
 
     using WindowElement = typename Mma::IteratorB::Element;
@@ -285,6 +286,13 @@ struct Conv {
     // stripmines a pitch-linear tile among a given number of threads, first along the contiguous
     // dimension then along the strided dimension.
     using WindowThreadMap = transform::PitchLinearStripminedThreadMap<WindowShape, kThreadCount>;
+
+  //     using IteratorThreadMapB = transform::PitchLinearStripminedThreadMap<
+  //   layout::PitchLinearShape<Shape::kN, Shape::kK>,
+  //   kThreads,
+  //   kElementsPerAccess
+  // >;
+
 
     // Define the PredicateTileIterator, using TileShape, Element, Layout, and ThreadMap types
     using WindowGmemIterator = transform::threadblock::PredicatedTileIterator<
@@ -304,41 +312,37 @@ struct Conv {
   // Iterators to write to shared memory
   /// Shared memory iterator to  Window Smem (we assume the same tile shape)
       using WindowSmemIterator = transform::threadblock::RegularTileIterator<
-          WindowShape,
-          WindowElement,
-          WindowLayout,
-          0,
-          WindowThreadMap>;
+          WindowShape, WindowElement, WindowLayout, 0, WindowThreadMap>;
 
-      WindowGmemIterator src_iterator(WindowLayout(params.window_sizes[1]), params.windows[1], window_extent, thread_idx);
-      WindowSmemIterator dst_iterator(shared_storage.main_loop.operand_Window_ref(), thread_idx);
-      __syncthreads();
+      WindowGmemIterator src_iterator(WindowLayout(1024), params.windows[1], window_extent, thread_idx);
+      WindowSmemIterator dst_iterator(shared_storage.main_loop.operand_Window_ref(1024), thread_idx);
+      // dst_iterator.set_iteration_index(iterations);
 
       typename WindowGmemIterator::Fragment fragment;
 
-      for (int i = 0; i < fragment.size(); ++i)
-      {
-        fragment[i] = 0;
-    }
+      // for (int i = 0; i < fragment.size(); ++i)
+      // {
+      //   fragment[i] = 0;
+      // }
 
+    fragment.clear();
     src_iterator.load(fragment);
-    for(int i = 0; i < fragment.size(); ++i) {
-      printf("Tid: %d, frag: %d, %f\n", threadIdx.x, i, fragment[i]);
-    }
     dst_iterator.store(fragment);
-
-    // src_iterator.clear_mask();
-
+    // for(int i = 0; i < fragment.size(); ++i) {
+    //   printf("Tid: %d, frag: %d, %f\n", threadIdx.x, i, fragment[i]);
+    // }
+    __syncthreads();
     ++src_iterator;
     ++dst_iterator;
 
     for(; iterations > 1; --iterations) {
 
       src_iterator.load(fragment);
-      for(int i = 0; i < fragment.size(); ++i) {
-        printf("Tid: %d, frag: %d, it: %d, %f\n", threadIdx.x, i, iterations, fragment[i]);
-      }
+      // for(int i = 0; i < fragment.size(); ++i) {
+      //   printf("Tid: %d, frag: %d, it: %d, %f\n", threadIdx.x, i, iterations, fragment[i]);
+      // }
       dst_iterator.store(fragment);
+      // dst_iterator.
 
       ++src_iterator;
       ++dst_iterator;
@@ -350,7 +354,7 @@ struct Conv {
     // TODO(klecki): load from  params.windows[1] to window.data()
     // Construct the windows:
     // TensorRef
-    auto window = shared_storage.main_loop.operand_Window_ref();
+    auto window = shared_storage.main_loop.operand_Window_ref(params.window_sizes[1]);
 
     // TODO(klecki):
     // eithere compute the window directly in SMEM or get it from GMEM
@@ -367,7 +371,7 @@ struct Conv {
     // }
     // __syncthreads();
     PRINT_IF
-      for (int i = 0; i < params.window_sizes[1]; i++) {
+      for (int i = 0; i < 512; i++) {
         printf("window %d: %f %f\n", i, params.windows[1][i], window.data()[i]);
       }
 
