@@ -24,6 +24,9 @@
  **************************************************************************************************/
 /*! \file
     \brief Template for a double-buffered threadblock-scoped GEMM kernel.
+
+
+    Needed to adjust the SMEM layout and add the Convolution window
 */
 
 #pragma once
