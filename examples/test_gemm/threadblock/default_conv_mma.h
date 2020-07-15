@@ -37,10 +37,11 @@
 #include "cutlass/transform/threadblock/predicated_tile_iterator.h"
 #include "threadblock/position_predicated_tile_iterator.h"
 #include "cutlass/transform/threadblock/predicated_tile_iterator_2dthreadtile.h"
-// #include "cutlass/gemm/threadblock/default_mma_core_sm70.h"
-// #include "cutlass/gemm/threadblock/default_mma_core_sm75.h"
-// #include "cutlass/gemm/threadblock/default_mma_core_sm80.h"
-#include "threadblock/default_conv_mma_core.h"
+#include "threadblock/conv_mma_pipelined.h"
+#include "cutlass/gemm/threadblock/default_mma_core_sm70.h"
+#include "cutlass/gemm/threadblock/default_mma_core_sm75.h"
+#include "cutlass/gemm/threadblock/default_mma_core_sm80.h"
+
 
 #if defined(CUTLASS_ARCH_WMMA_ENABLED)
 #include "cutlass/gemm/threadblock/default_mma_core_wmma.h"
@@ -124,7 +125,7 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
                   arch::OpClassSimt, ArchTag, ThreadblockShape, WarpShape,
                   InstructionShape, 2, Operator, false> {
   // Define the MmaCore components
-  using MmaCore = typename cutlass::gemm::threadblock::DefaultConvMmaCore<
+  using MmaCore = typename cutlass::gemm::threadblock::DefaultMmaCore<
       ThreadblockShape, WarpShape, InstructionShape, ElementA, LayoutA,
       ElementB, LayoutB, ElementAccumulator, layout::RowMajor,
       arch::OpClassSimt, 2, Operator>;
@@ -147,7 +148,7 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 //   using TileShapeB = cutlass::layout::PitchLinearShape<MmaCore::Shape::kK, 1>; // we only load one row of window - hmm, it's bad that it's the other way round
 //   using TileLayoutB = cutlass::layout::PitchLinear;
 
-//   // in  DefaultConvMmaCore
+//   // in  DefaultMmaCore
 //     /// Policy of iterator B
 //   using IteratorThreadMapB = transform::PitchLinearStripminedThreadMap<
 //     TileShapeB,
@@ -208,7 +209,7 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 //                   arch::OpClassTensorOp, ArchTag, ThreadblockShape, WarpShape,
 //                   InstructionShape, 2, Operator, false> {
 //   // Define the MmaCore components
-//   using MmaCore = typename cutlass::gemm::threadblock::DefaultConvMmaCore<
+//   using MmaCore = typename cutlass::gemm::threadblock::DefaultMmaCore<
 //       ThreadblockShape, WarpShape, InstructionShape, ElementA, LayoutA,
 //       ElementB, LayoutB, ElementAccumulator, layout::RowMajor,
 //       arch::OpClassTensorOp, 2, Operator>;
@@ -259,7 +260,7 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 //                   arch::OpClassTensorOp, ArchTag, ThreadblockShape, WarpShape,
 //                   InstructionShape, 2, Operator, false> {
 //   // Define the MmaCore components
-//   using MmaCore = typename cutlass::gemm::threadblock::DefaultConvMmaCore<
+//   using MmaCore = typename cutlass::gemm::threadblock::DefaultMmaCore<
 //       ThreadblockShape, WarpShape, InstructionShape, float, LayoutA, float,
 //       LayoutB, float, layout::RowMajor, arch::OpClassTensorOp, 2,
 //       arch::OpMultiplyAddFastF16>;
@@ -321,7 +322,7 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 //                   ArchTag, ThreadblockShape, WarpShape, InstructionShape, 2,
 //                   Operator, true> {
 //   // Define the MmaCore components
-//   using MmaCore = typename cutlass::gemm::threadblock::DefaultConvMmaCore<
+//   using MmaCore = typename cutlass::gemm::threadblock::DefaultMmaCore<
 //       ThreadblockShape, WarpShape, InstructionShape, ElementA, LayoutA,
 //       ElementB, LayoutB, ElementAccumulator,
 //       layout::ColumnMajorInterleaved<InterleavedK>, OperatorClass, 2, Operator,
@@ -387,7 +388,7 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 //                   arch::OpClassSimt, ArchTag, ThreadblockShape, WarpShape,
 //                   InstructionShape, Stages, Operator, false> {
 //   // Define the MmaCore components
-//   using MmaCore = typename cutlass::gemm::threadblock::DefaultConvMmaCore<
+//   using MmaCore = typename cutlass::gemm::threadblock::DefaultMmaCore<
 //       ThreadblockShape, WarpShape, InstructionShape, ElementA, LayoutA,
 //       ElementB, LayoutB, ElementAccumulator, layout::RowMajor, arch::OpClassSimt,
 //       Stages, Operator>;
@@ -462,7 +463,7 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 //           : cutlass::arch::CacheOperation::Always;
 
 //   // Define the MmaCore components
-//   using MmaCore = typename cutlass::gemm::threadblock::DefaultConvMmaCore<
+//   using MmaCore = typename cutlass::gemm::threadblock::DefaultMmaCore<
 //       ThreadblockShape, WarpShape, InstructionShape, ElementA, LayoutA,
 //       ElementB, LayoutB, ElementAccumulator, layout::RowMajor, arch::OpClassTensorOp,
 //       Stages, Operator, false, CacheOpA, CacheOpB>;
@@ -531,7 +532,7 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 //                   ArchTag, ThreadblockShape, WarpShape, InstructionShape,
 //                   Stages, Operator, true> {
 //   // Define the MmaCore components
-//   using MmaCore = typename cutlass::gemm::threadblock::DefaultConvMmaCore<
+//   using MmaCore = typename cutlass::gemm::threadblock::DefaultMmaCore<
 //       ThreadblockShape, WarpShape, InstructionShape, ElementA, LayoutA,
 //       ElementB, LayoutB, ElementAccumulator,
 //       layout::ColumnMajorInterleaved<InterleavedK>, OperatorClass, Stages,
@@ -596,7 +597,7 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 //   static const bool transposeB =  cutlass::platform::is_same< LayoutB, layout::RowMajor >::value;
 
 //   // Define the MmaCore components
-//   using MmaCore = typename cutlass::gemm::threadblock::DefaultConvMmaCore<
+//   using MmaCore = typename cutlass::gemm::threadblock::DefaultMmaCore<
 //       ThreadblockShape, WarpShape, InstructionShape, ElementA, LayoutA,
 //       ElementB, LayoutB, ElementAccumulator, layout::RowMajor,
 //       OperatorClass, 2, Operator>;
@@ -656,7 +657,7 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 //                   arch::OpClassWmmaTensorOp, ArchTag, ThreadblockShape, WarpShape,
 //                   InstructionShape, 2, Operator> {
 //   // Define the MmaCore components
-//   using MmaCore = typename cutlass::gemm::threadblock::DefaultConvMmaCore<
+//   using MmaCore = typename cutlass::gemm::threadblock::DefaultMmaCore<
 //       ThreadblockShape, WarpShape, InstructionShape, ElementA, LayoutA,
 //       ElementB, LayoutB, ElementAccumulator, LayoutC,
 //       arch::OpClassWmmaTensorOp, 2, Operator>;
@@ -715,7 +716,7 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 //                   arch::OpClassWmmaTensorOp, ArchTag, ThreadblockShape, WarpShape,
 //                   InstructionShape, 1, Operator> {
 //   // Define the MmaCore components
-//   using MmaCore = typename cutlass::gemm::threadblock::DefaultConvMmaCore<
+//   using MmaCore = typename cutlass::gemm::threadblock::DefaultMmaCore<
 //       ThreadblockShape, WarpShape, InstructionShape, ElementA, LayoutA,
 //       ElementB, LayoutB, ElementAccumulator, LayoutC,
 //       arch::OpClassWmmaTensorOp, 1, Operator>;

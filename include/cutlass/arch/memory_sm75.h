@@ -77,7 +77,7 @@ inline __device__ void ldsm(Array<unsigned, MatrixCount> & D, void const* ptr);
   extern "C" {
   //
   // This NVVM intrinsic is subject to change in future versions of CUDA.
-  // Clients should not call it directly. Rather, they should use the 
+  // Clients should not call it directly. Rather, they should use the
   // cutlass::arch::ldsm<>() template.
   //
   __device__ uint32_t __nvvm_get_smem_pointer(void *);
@@ -91,7 +91,7 @@ inline __device__ unsigned cutlass_get_smem_pointer(void *ptr) {
 
 // We prefer to use the new CVTA intrinsics if they are available, otherwise we will fall back to
 // the previous internal intrinsics if they are available.
-#if (defined(__CUDA_ARCH__) && __CUDACC_VER_MAJOR__ >= 11)
+#if (defined(__CUDA_ARCH__) && __CUDACC_VER_MAJOR__ >= 11 && !defined(__clang__))
   //
   // This NVVM intrinsic converts an address in shared memory to a plain
   // unsigned integer. This is necessary to pass to shared memory instructions
@@ -113,7 +113,7 @@ inline __device__ unsigned cutlass_get_smem_pointer(void *ptr) {
   uint32_t smem_ptr;
 
   asm(
-  "{ .reg .u64 smem_ptr; cvta.to.shared.u64 smem_ptr, %1; cvt.u32.u64 %0, smem_ptr; }\n" 
+  "{ .reg .u64 smem_ptr; cvta.to.shared.u64 smem_ptr, %1; cvt.u32.u64 %0, smem_ptr; }\n"
     : "=r"(smem_ptr) : "l"(ptr));
 
   return smem_ptr;
@@ -123,7 +123,7 @@ inline __device__ unsigned cutlass_get_smem_pointer(void *ptr) {
   return 0;
 #endif
 }
-  
+
 /// CUTLASS helper to get SMEM pointer
 inline __device__ unsigned cutlass_get_smem_pointer(void const *ptr) {
   return cutlass_get_smem_pointer(const_cast<void *>(ptr));
