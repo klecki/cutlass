@@ -115,7 +115,9 @@ template <
     /// Operation performed by GEMM
     typename Operator,
     /// Beta is zero or not
-    bool IsBetaZero = false>
+    bool IsBetaZero = false,
+    /// If the convolution is computed in the innermost or outer dimension
+    bool InnerConv = true>
 struct DefaultConv;
 
 
@@ -150,7 +152,11 @@ template <
     /// If true, kernel is configured to support serial reduction in the epilogue
     bool SplitKSerial,
     /// Operation performed by GEMM
-    typename Operator
+    typename Operator,
+    /// ignored for this specialization
+    bool IsBetaZero,
+    /// If the convolution is computed in the innermost or outer dimension
+    bool InnerConv
   >
 struct DefaultConv<
     ElementA,
@@ -171,7 +177,9 @@ struct DefaultConv<
     ThreadblockSwizzle,
     2,
     SplitKSerial,
-    Operator> {
+    Operator,
+    IsBetaZero,
+    InnerConv> {
   /// Define the threadblock-scoped matrix multiply-accumulate
   using Mma = typename cutlass::gemm::threadblock::DefaultConvMma<
       ElementA,
@@ -188,7 +196,9 @@ struct DefaultConv<
       WarpShape,
       GemmShape<1, 1, 1>,
       2,
-      Operator>::ThreadblockMma;
+      Operator,
+      IsBetaZero,
+      InnerConv>::ThreadblockMma;
 
   static int const kEpilogueElementsPerAccess = EpilogueOutputOp::kCount;
   static_assert(kEpilogueElementsPerAccess == 1, "simt epilogue must operate on scalars");
