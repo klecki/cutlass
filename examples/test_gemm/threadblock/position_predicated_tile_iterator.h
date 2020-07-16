@@ -206,6 +206,8 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
   class Params {
    public:
     friend PositionPredicatedTileIterator;
+    int window_size_;
+    int channels_;
 
    private:
     /// Parameters object
@@ -214,7 +216,8 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
    public:
     /// Construct the Params object given a pitch-linear tensor's layout
     CUTLASS_HOST_DEVICE
-    Params(Layout const &layout) : params_(layout) { }
+    Params(Layout const &layout, int window_size, int channels) :
+        params_(layout), window_size_(window_size), channels_(channels) { }
 
     CUTLASS_HOST_DEVICE
     Params() { }
@@ -249,11 +252,10 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
       /// ID of each participating thread
       int thread_id,
       /// Initial offset of threadblock
-      TensorCoord const &threadblock_offset,
-      int window_size, int channels = 1)
+      TensorCoord const &threadblock_offset)
       : address_iterator_(params.params_, pointer, extent, thread_id,
-                          threadblock_offset), pointer_(pointer), window_size_(window_size),
-                          channels_(channels) {
+                          threadblock_offset), pointer_(pointer), window_size_(params.window_size_),
+                          channels_(params.channels_) {
     PRINT_IF
       printf("PositionPredicatedTileIterator ThreadMap::Iterations::kCount: %d ThreadMap::kElementsPerAccess: %d\n", ThreadMap::Iterations::kCount, ThreadMap::kElementsPerAccess);
   }
@@ -758,7 +760,9 @@ public:
 
     /// Construct the Params object given a pitch-linear tensor's layout
     CUTLASS_HOST_DEVICE
-    Params(Layout const &layout): params_(layout::PitchLinear(layout.stride(0))) {
+    Params(Layout const &layout,
+    int window_size,                              ///< window size to be sampled
+    int channels = 1): params_(layout::PitchLinear(layout.stride(0)), window_size, channels) {
 
     };
   };
@@ -782,18 +786,14 @@ public:
     Pointer pointer,                              ///< Pointer to start of tensor
     TensorCoord extent,                           ///< Extent of tensor
     int thread_id,                                ///< ID of each participating thread
-    TensorCoord const &threadblock_offset,        ///< Initial offset of threadblock
-    int window_size,                              ///< window size to be sampled
-    int channels = 1
+    TensorCoord const &threadblock_offset         ///< Initial offset of threadblock
   ):
     iterator_(
       params.params_,
       pointer,
       layout::PitchLinearCoord(extent.column(), extent.row()),
       thread_id,
-      layout::PitchLinearCoord(threadblock_offset.column(), threadblock_offset.row()),
-      window_size,
-      channels
+      layout::PitchLinearCoord(threadblock_offset.column(), threadblock_offset.row())
     ) { }
 
   /// Construct a PositionPredicatedTileIterator with zero threadblock offset

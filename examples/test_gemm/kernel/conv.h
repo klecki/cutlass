@@ -116,36 +116,19 @@ struct Conv {
       int *workspace = nullptr
     ):
       channels(channels),
-      window_size(ref_conv_Window.stride()[0]),
+      window_size(ref_conv_Window.stride(0)),
       problem_size(problem_size),
       grid_tiled_shape(grid_tiled_shape),
       params_In(ref_In.layout()),
       ref_In(ref_In),
-      params_Window(layout::RowMajor(kInnerConv ? problem_size.n() : problem_size.m())), // todo(klecki): pass window_size, channels
+      params_Window(layout::RowMajor(kInnerConv ? problem_size.n() : problem_size.m()), window_size, channels),
       ref_conv_Window(ref_conv_Window), // do not pass explicit window, we construct it later
       params_C(ref_C.layout()),
       ref_C(ref_C),
       params_D(ref_D.layout()),
       ref_D(ref_D),
       output_op(output_op) {
-
-
-      // // TODO(klecki): not the most obvious place for problem size calculation
-      // // Left matrix is H x WC = M x K, virtual right is WC x WC = K x N, hence M, N, K := H, WC, WC
-      // problem_size_inner(matrix_dims[0], matrix_dims[1] * channels, matrix_dims[1] * channels),
-      // // Right matrix is H x WC = K x N, left is H x H = M x K; hence M, N, K := H, WC, H
-      // problem_size_outer(matrix_dims[0], matrix_dims[1] * channels, matrix_dims[0]),
-
-      // if (InnerConv) {
-      //   // Left matrix is H x WC = M x K, virtual right is WC x WC = K x N, hence M, N, K := H, WC, WC
-      //   problem_size_inner = {matrix_dims[0], matrix_dims[1] * channels, matrix_dims[1] * channels},
-      // }
-
-      // int total_gemm_k_iterations = (problem_size.k() + Mma::Shape::kK - 1) / Mma::Shape::kK;
-      // int gemm_k_iterations = (total_gemm_k_iterations + grid_tiled_shape.k() - 1) / grid_tiled_shape.k();
-
       gemm_k_size = calc_gemm_k_size(problem_size, grid_tiled_shape);
-      // gemm_k_size_outer = calc_gemm_k_size(problem_size_outer, grid_tiled_shape);
 
       semaphore = workspace;
     }
@@ -211,6 +194,104 @@ struct Conv {
     return Status::kSuccess;
   }
 
+  CUTLASS_DEVICE
+  void transfer_conv_window(Params const &params, typename Mma::TensorRefWindow &window_smem) {
+
+    ////////////
+    //  Copy the window from global mem to smem for matrix bulding lookups
+    // Load from params.ref_conv_Window to shared_storage.main_loop.operand_Window
+
+    // int const kWindowLength = Mma::SharedStorage::ShapeWindow;
+    // The PredicateTileIterator expects PitchLinearShape and PitchLinear layout.
+    // The target shape is RowMajor<1, ConvMmaBase::kWindowLength>, we map it to PitchLinear
+    // using WindowShape = typename Mma::SharedStorage::ShapeWindow;
+    using WindowShape = layout::PitchLinearShape<kThreadCount, 1>;
+
+    // ThreadMaps define how threads are mapped to a given tile. The PitchLinearStripminedThreadMap
+    // stripmines a pitch-linear tile among a given number of threads, first along the contiguous
+    // dimension then along the strided dimension.
+    using WindowThreadMap = transform::PitchLinearStripminedThreadMap<WindowShape, kThreadCount>;
+
+    // Define the PredicateTileIterator, using TileShape, Element, Layout, and ThreadMap types
+    using WindowIterator = transform::threadblock::PredicatedTileIterator<
+        WindowShape, WindowElement, WindowLayout, 0, WindowThreadMap>;
+
+    cutlass::Coord<2> window_extent = cutlass::make_Coord(params.window_size, 1);
+
+    int iterations = (params.window_size + WindowShape::kContiguous - 1) / WindowShape::kContiguous;
+
+    WindowIterator src_iterator(params.ref_conv_Window.layout(), params.ref_conv_Window.data(), window_extent, threadIdx.x);
+    WindowIterator dst_iterator(window_smem.layout(), window_smem.data(), window_extent, threadIdx.x);
+
+    typename WindowIterator::Fragment fragment;
+
+
+    fragment.clear();
+
+    src_iterator.load(fragment);
+    dst_iterator.store(fragment);
+    ++src_iterator;
+    ++dst_iterator;
+
+    for(; iterations > 1; --iterations) {
+      src_iterator.load(fragment);
+      dst_iterator.store(fragment);
+      ++src_iterator;
+      ++dst_iterator;
+    }
+    __syncthreads();
+  }
+
+
+  /// For inner convolution, input is lhs and window-matrix is rhs
+  /// For outer convolution, it's the opposite: input is rhs, window-matrix is lhs
+
+  template <bool IsInnerConv>
+  CUTLASS_DEVICE
+  std::enable_if_t<IsInnerConv, typename Mma::IteratorA::Params> select_params_A(Params const &params) {
+    return params.params_In;
+  }
+
+  template <bool IsInnerConv>
+  CUTLASS_DEVICE
+  std::enable_if_t<!IsInnerConv, typename Mma::IteratorA::Params> select_params_A(Params const &params) {
+    return params.params_Window;
+  }
+
+  template <bool IsInnerConv>
+  CUTLASS_DEVICE
+  std::enable_if_t<IsInnerConv, typename Mma::IteratorB::Params> select_params_B(Params const &params) {
+    return params.params_Window;
+  }
+
+  template <bool IsInnerConv>
+  CUTLASS_DEVICE
+  std::enable_if_t<!IsInnerConv, typename Mma::IteratorB::Params> select_params_B(Params const &params) {
+    return params.params_In;
+  }
+
+  template <bool IsInnerConv>
+  CUTLASS_DEVICE
+  typename Mma::IteratorA::Pointer select_data_A(void *in_data, void *window_data) {
+    if (IsInnerConv) {
+      return static_cast<typename Mma::IteratorA::Pointer>(in_data);
+    } else {
+      return static_cast<typename Mma::IteratorA::Pointer>(window_data);
+    }
+  }
+
+
+  template <bool IsInnerConv>
+  CUTLASS_DEVICE
+  typename Mma::IteratorB::Pointer select_data_B(void *in_data, void *window_data) {
+    if (IsInnerConv) {
+      return static_cast<typename Mma::IteratorB::Pointer>(window_data);
+    } else {
+      return static_cast<typename Mma::IteratorB::Pointer>(in_data);
+    }
+  }
+
+
   /// Executes one GEMM
   CUTLASS_DEVICE
   void operator()(Params const &params, SharedStorage &shared_storage) {
@@ -264,100 +345,9 @@ struct Conv {
     // Compute position within threadblock
     int thread_idx = threadIdx.x;
 
-    // Construct iterators to A and B operands
-    // Global mem iterators
-    typename Mma::IteratorA iterator_A(
-      params.params_In,
-      params.ref_In.data(),
-      {params.problem_size.m(), problem_size_k},
-      thread_idx,
-      tb_offset_A);
-
-
-    ////////////
-    //  Copy the window from global mem to smem for matrix bulding lookups
-
-    // Load from  params.windows[1] to window.data()
-    // Construct the windows:
-    // TensorRef
-    auto window = shared_storage.main_loop.operand_Window_ref(params.window_size);
-
-    // int const kWindowLength = Mma::SharedStorage::ShapeWindow;
-    // The PredicateTileIterator expects PitchLinearShape and PitchLinear layout.
-    // The target shape is RowMajor<1, ConvMmaBase::kWindowLength>, we map it to PitchLinear
-    // using WindowShape = typename Mma::SharedStorage::ShapeWindow;
-    using WindowShape = layout::PitchLinearShape<kThreadCount, 1>;
-
-    // using Element = int;
-    // TODO(klecki): this is only defined in some lower layer
-
-    // ThreadMaps define how threads are mapped to a given tile. The PitchLinearStripminedThreadMap
-    // stripmines a pitch-linear tile among a given number of threads, first along the contiguous
-    // dimension then along the strided dimension.
-    using WindowThreadMap = transform::PitchLinearStripminedThreadMap<WindowShape, kThreadCount>;
-
-  //     using IteratorThreadMapB = transform::PitchLinearStripminedThreadMap<
-  //   layout::PitchLinearShape<Shape::kN, Shape::kK>,
-  //   kThreads,
-  //   kElementsPerAccess
-  // >;
-
-
-    // Define the PredicateTileIterator, using TileShape, Element, Layout, and ThreadMap types
-    using WindowGmemIterator = transform::threadblock::PredicatedTileIterator<
-        WindowShape, WindowElement, WindowLayout, 0, WindowThreadMap>;
-
-    // it's (contiguous, strided)
-    // TODO(klecki): !!! This works only when the tile is bigger then the extent
-    // I don't know why
-    cutlass::Coord<2> window_extent = cutlass::make_Coord(params.window_size, 1);
-
-    int iterations = (params.window_size + WindowShape::kContiguous - 1) / WindowShape::kContiguous;
-
-    PRINT_IF
-      printf(">>> Loading iterations: %d\n", iterations);
-
-  //
-  // Iterators to write to shared memory
-  /// Shared memory iterator to  Window Smem (we assume the same tile shape)
-      using WindowSmemIterator = transform::threadblock::RegularTileIterator<
-          WindowShape, WindowElement, WindowLayout, 0, WindowThreadMap>;
-
-      WindowGmemIterator src_iterator(params.ref_conv_Window.layout(), params.ref_conv_Window.data(), window_extent, thread_idx);
-      // WindowSmemIterator dst_iterator(shared_storage.main_loop.operand_Window_ref(1024), thread_idx);
-      WindowGmemIterator dst_iterator(WindowLayout(1024), window.data(), window_extent, thread_idx);
-      // dst_iterator.set_iteration_index(iterations);
-
-      typename WindowGmemIterator::Fragment fragment;
-
-      // for (int i = 0; i < fragment.size(); ++i)
-      // {
-      //   fragment[i] = 0;
-      // }
-
-    fragment.clear();
-    src_iterator.load(fragment);
-    dst_iterator.store(fragment);
-    // for(int i = 0; i < fragment.size(); ++i) {
-    //   printf("Tid: %d, frag: %d, %f\n", threadIdx.x, i, fragment[i]);
-    // }
-    __syncthreads();
-    ++src_iterator;
-    ++dst_iterator;
-
-    for(; iterations > 1; --iterations) {
-
-      src_iterator.load(fragment);
-      // for(int i = 0; i < fragment.size(); ++i) {
-      //   printf("Tid: %d, frag: %d, it: %d, %f\n", threadIdx.x, i, iterations, fragment[i]);
-      // }
-      dst_iterator.store(fragment);
-      // dst_iterator.
-
-      ++src_iterator;
-      ++dst_iterator;
-    }
-    __syncthreads();
+    auto window_smem = shared_storage.main_loop.operand_Window_ref(params.window_size);
+    // Transfer window from gmem to smem
+    transfer_conv_window(params, window_smem);
 
 
 
@@ -369,18 +359,31 @@ struct Conv {
     // }
     // __syncthreads();
 
+    void *in_data = params.ref_In.data();
+    void *window_data = window_smem.data();
+
+    // Construct iterators to A and B operands
+    // Global mem iterators
+    typename Mma::IteratorA iterator_A(
+      select_params_A<kInnerConv>(params),
+      select_data_A<kInnerConv>(params.ref_In.data(), window_smem.data()),
+      // (kInnerConv ? static_cast<Mma::IteratorA::Pointer>(in_data) : static_cast<Mma::IteratorA::Pointer>(window_data)),
+      {params.problem_size.m(), problem_size_k},
+      thread_idx,
+      tb_offset_A);
+
 
     typename Mma::IteratorB iterator_B(
       // Fake stride
-      params.params_Window,
+      select_params_B<kInnerConv>(params),
       // Pointer to the smem that would be sampled
-      window.data(),
+      select_data_B<kInnerConv>(params.ref_In.data(), window_smem.data()),
+      // (kInnerConv ? static_cast<Mma::IteratorA::Pointer>(window_data) : static_cast<Mma::IteratorA::Pointer>(in_data)),
+      // window_smem.data(),
       // Emulated matrix shape
       {problem_size_k, params.problem_size.n()},
       thread_idx,
-      tb_offset_B,
-      // size of the window used
-      params.window_size);
+      tb_offset_B);
 
     // Broadcast the warp_id computed by lane 0 to ensure dependent code
     // is compiled as warp-uniform.
