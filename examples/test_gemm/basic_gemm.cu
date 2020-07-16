@@ -74,7 +74,7 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 
-static constexpr int kWindowSize = 65;
+static constexpr int kWindowSize = 17;
 
 using A_type = float;
 using B_type = float;
@@ -117,7 +117,7 @@ cudaError_t CutlassSgemmNN(
                                                   RowMajor,  // Layout of A matrix
                                                   B_type,        // Data-type of B matrix
                                                   C_type,        // Data-type of C matrix
-                                                  RowMajor>; // Layout of C matrix
+                                                  RowMajor, 2, false>; // Layout of C matrix
 
   // Define a CUTLASS GEMM type
   CutlassConv gemm_operator;
@@ -428,7 +428,7 @@ std::enable_if_t<std::is_integral<T>::value, T> idx_reflect_101(T idx, T size) {
 }
 
 /// Naive reference Conv computation.
-__global__ void ReferenceConv_kernel(
+__global__ void ReferenceConv_kernel_inner(
   int M, // rows
   int N, // cols
   int radius,
@@ -454,6 +454,35 @@ __global__ void ReferenceConv_kernel(
   }
 }
 
+
+/// Naive reference Conv computation.
+__global__ void ReferenceConv_kernel_outer(
+  int M, // rows
+  int N, // cols
+  int radius,
+  float alpha,
+  A_type const *A,
+  int lda,
+  B_type const *window,
+  float beta,
+  C_type *C,
+  int ldc) {
+
+  int row = threadIdx.x + blockIdx.x * blockDim.x;
+  int col = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (row < M && col < N) {
+    C_type accumulator = 0;
+
+    for (int k = -radius; k <= radius; ++k) {
+      accumulator += A[idx_reflect_101(row + k, M) * lda + col] * window[k];
+    }
+
+    C[row * ldc + col] = alpha * accumulator + beta * C[row * ldc + col];
+  }
+}
+
+
 /// Reference Conv computation.
 cudaError_t ReferenceConv(
   int M,
@@ -465,15 +494,18 @@ cudaError_t ReferenceConv(
   B_type const *window,
   float beta,
   C_type *C,
-  int ldc) {
+  int ldc, bool inner) {
 
   dim3 block(16, 16);
   dim3 grid(
     (M + block.x - 1) / block.x,
     (N + block.y - 1) / block.y
   );
+  if (inner)
+    ReferenceConv_kernel_inner<<< grid, block >>>(M, N, radius, alpha, A, lda, window, beta, C, ldc);
+  else
+    ReferenceConv_kernel_outer<<< grid, block >>>(M, N, radius, alpha, A, lda, window, beta, C, ldc);
 
-  ReferenceConv_kernel<<< grid, block >>>(M, N, radius, alpha, A, lda, window, beta, C, ldc);
 
   return cudaGetLastError();
 }
@@ -619,7 +651,7 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta) {
 
   // Launch reference GEMM
   // result = ReferenceGemm(M, N, K, alpha, A, lda, B, ldb, beta, C_reference, ldc);
-  result = ReferenceConv(M, N, radius, alpha, A, lda, window + radius, beta, C_reference, ldc);
+  result = ReferenceConv(M, N, radius, alpha, A, lda, window + radius, beta, C_reference, ldc, false);
 
   if (result != cudaSuccess) {
     std::cerr << "Reference GEMM kernel failed: "
@@ -686,8 +718,8 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta) {
   // dbg(host_cutlass);
   std::cout << "CUTLASS A" << std::endl;
   print_mat(M, K, host_a);
-  std::cout << "CUTLASS B" << std::endl;
-  print_mat(K, N, host_b);
+  // std::cout << "CUTLASS B" << std::endl;
+  // print_mat(K, N, host_b);
 
   std::cout << "CUTLASS reference" << std::endl;
   print_mat(M, N, host_reference);

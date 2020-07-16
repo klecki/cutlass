@@ -171,6 +171,7 @@ template <
     typename LayoutOut_,
     // Number of input data axes to process
     int Axes = 2,
+    bool InnerConv = true,
     /// Element type for internal accumulation
     typename ElementAccumulator_ = ElementOut_,
     /// Operator class tag
@@ -249,6 +250,7 @@ class Conv {
   static_assert(kSplitKSerial == false, "Only basic options are supported");
   static int const split_k_slices = 1; // TODO(klecki): investigate how this can be used, now assume 1
   static int const kAxes = Axes;
+  static bool const kInnerConv = InnerConv;
 
   /// Define the kernel, SIMT
   using GemmKernelInner = typename kernel::DefaultConv<
@@ -272,32 +274,32 @@ class Conv {
     kSplitKSerial,
     Operator,
     kIsBetaZero,
-    true
+    kInnerConv
   >::GemmKernel;
 
-  using GemmKernelOuter = typename kernel::DefaultConv<
-    ElementIn,
-    LayoutIn,
-    kAlignmentA,
-    ElementWindow,
-    LayoutWindow,
-    kAlignmentB,
-    ElementOut,
-    LayoutOut,
-    ElementAccumulator,
-    OperatorClass,
-    ArchTag,
-    ThreadblockShape,
-    WarpShape,
-    InstructionShape,
-    EpilogueOutputOp,
-    ThreadblockSwizzle,
-    kStages,
-    kSplitKSerial,
-    Operator,
-    kIsBetaZero,
-    false
-  >::GemmKernel;
+  // using GemmKernelOuter = typename kernel::DefaultConv<
+  //   ElementIn,
+  //   LayoutIn,
+  //   kAlignmentA,
+  //   ElementWindow,
+  //   LayoutWindow,
+  //   kAlignmentB,
+  //   ElementOut,
+  //   LayoutOut,
+  //   ElementAccumulator,
+  //   OperatorClass,
+  //   ArchTag,
+  //   ThreadblockShape,
+  //   WarpShape,
+  //   InstructionShape,
+  //   EpilogueOutputOp,
+  //   ThreadblockSwizzle,
+  //   kStages,
+  //   kSplitKSerial,
+  //   Operator,
+  //   kIsBetaZero,
+  //   false
+  // >::GemmKernel;
 
   /// Argument structure
   struct Arguments {
@@ -354,7 +356,7 @@ private:
 
   /// Kernel parameters object
   typename GemmKernelInner::Params params_inner_;
-  typename GemmKernelOuter::Params params_outer_;
+  // typename GemmKernelOuter::Params params_outer_;
 
 public:
 
@@ -457,7 +459,7 @@ public:
     // Initialize the Params structure
     params_inner_ = typename GemmKernelInner::Params{
       args.channels,
-      GetProblemSize(args.matrix_size, args.channels, true),
+      GetProblemSize(args.matrix_size, args.channels, kInnerConv),
       grid_shape,
       args.ref_In.non_const_ref(),
       {args.ref_Windows[1], {args.window_sizes[1]}}, // build window ref on the fly
