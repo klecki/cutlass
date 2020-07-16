@@ -75,6 +75,7 @@ template <
   typename LayoutC_,
   /// Policy describing tuning details (concept: ConvMmaPolicy)
   typename Policy_,
+  bool InnerConv = true,
   /// Transformation applied to A operand
   typename TransformA_ = NumericArrayConverter<
     typename SmemIteratorA_::Element,
@@ -96,9 +97,17 @@ public:
   using Base = ConvMmaBase<Shape_, Policy_, 2>;
   // static const int x__ = Debugx<2222, Base>::f();
 
+  static int const kInnerConv = InnerConv;
+
   using Shape = Shape_;             ///< Size of the Gemm problem - concept: gemm::GemmShape<>
-  using IteratorA = IteratorA_;     ///< Iterates over tiles of A operand in global memory
-  using IteratorB = IteratorB_;     ///< Iterates over tiles of B operand in global memory
+  using IteratorA = IteratorA_;     ///< Iterates over tiles of A operand
+  using IteratorB = IteratorB_;     ///< Iterates over tiles of B operand
+
+
+  using IteratorIn = std::conditional_t<kInnerConv, IteratorA, IteratorB>;  ///< Input operand in global memory
+  using IteratorWindow = std::conditional_t<kInnerConv, IteratorB, IteratorA>;  ///< Window Matrix generated on the fly
+
+
   using ElementC = ElementC_;       ///< Data type of accumulator matrix
   using LayoutC = LayoutC_;         ///< Layout of accumulator matrix
   using Policy = Policy_;           ///< Policy describing tuning details
@@ -136,6 +145,7 @@ public:
 
   // staticaly assert kStages for MmaPipelined is two (Double-buffered pipeline)
   static_assert((Base::kStages==2), "ConvMmaPipelined requires kStages set to value 2");
+
 
 private:
 

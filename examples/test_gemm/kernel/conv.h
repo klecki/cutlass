@@ -64,6 +64,12 @@ struct Conv {
   using OutputOp = typename Epilogue::OutputOp;
   using ThreadblockSwizzle = ThreadblockSwizzle_;
   static bool const kSplitKSerial = SplitKSerial;
+  static int const kInnerConv = Mma::kInnerConv;
+
+  /// Linear buffer with window values
+  using WindowElement = typename Mma::IteratorWindow::Element;
+  using WindowLayout = layout::PitchLinear;
+  using WindowRef = TensorRef<WindowElement, layout::PitchLinear>;
 
   // int x__ = Debugx<100, Mma, Epilogue, OutputOp, ThreadblockSwizzle>::f();
 
@@ -73,17 +79,14 @@ struct Conv {
 
   /// Parameters structure
   struct Params {
-    cutlass::Array<int, kAxes> matrix_dims;
-    cutlass::Array<int, kAxes> window_sizes;
     int channels;
-    cutlass::gemm::GemmCoord problem_size_inner;
-    cutlass::gemm::GemmCoord problem_size_outer;
+    int window_size;
+    cutlass::gemm::GemmCoord problem_size;
     cutlass::gemm::GemmCoord grid_tiled_shape;
-    typename Mma::IteratorA::Params params_In;
-    typename Mma::IteratorA::TensorRef ref_In;
-    Array<typename Mma::IteratorB::Element *, kAxes> windows;
-    typename Mma::IteratorB::Params params_Window_inner;
-    // typename Mma::IteratorB::Params params_Window_inner;
+    typename Mma::IteratorIn::Params params_In;
+    typename Mma::IteratorIn::TensorRef ref_In;
+    WindowRef ref_conv_Window;
+    typename Mma::IteratorWindow::Params params_Window;  ///< This are parameters for iterator
     typename Epilogue::OutputTileIterator::Params params_C;
     typename Epilogue::OutputTileIterator::TensorRef ref_C;
     typename Epilogue::OutputTileIterator::Params params_D;
@@ -91,9 +94,7 @@ struct Conv {
     typename OutputOp::Params output_op;
     int *semaphore;
     int gemm_k_iterations; // TODO(klecki): LOL, this is not set
-    // int gemm_k_size;
-    int gemm_k_size_inner;
-    int gemm_k_size_outer;
+    int gemm_k_size;
 
     //
     // Methods
@@ -104,35 +105,37 @@ struct Conv {
 
     CUTLASS_HOST_DEVICE
     Params(
-      const Array<int, kAxes> &matrix_dims_,
-      const Array<int, kAxes> &window_sizes_,
-      int channels_,
+      int channels,
+      cutlass::gemm::GemmCoord const & problem_size,
       cutlass::gemm::GemmCoord const & grid_tiled_shape,
-      typename Mma::IteratorA::TensorRef ref_In,
-      const Array<typename Mma::IteratorB::Element *, kAxes> &windows_,
+      typename Mma::IteratorIn::TensorRef ref_In,
+      WindowRef ref_conv_Window,
       typename Epilogue::OutputTileIterator::TensorRef ref_C,
       typename Epilogue::OutputTileIterator::TensorRef ref_D,
       typename OutputOp::Params output_op = typename OutputOp::Params(),
       int *workspace = nullptr
     ):
-      matrix_dims(matrix_dims_),
-      window_sizes(window_sizes_),
-      channels(channels_),
-      // TODO(klecki): not the most obvious place for problem size calculation
-      // Left matrix is H x WC = M x K, virtual right is WC x WC = K x N, hence M, N, K := H, WC, WC
-      problem_size_inner(matrix_dims[0], matrix_dims[1] * channels, matrix_dims[1] * channels),
-      // Right matrix is H x WC = K x N, left is H x H = M x K; hence M, N, K := H, WC, H
-      problem_size_outer(matrix_dims[0], matrix_dims[1] * channels, matrix_dims[0]),
+      channels(channels),
+      window_size(ref_conv_Window.stride()[0]),
+      problem_size(problem_size),
       grid_tiled_shape(grid_tiled_shape),
       params_In(ref_In.layout()),
       ref_In(ref_In),
-      windows(windows_),
-      params_Window_inner{layout::RowMajor{problem_size_inner.n()}},
+      params_Window(layout::RowMajor(kInnerConv ? problem_size.n() : problem_size.m())), // todo(klecki): pass window_size, channels
+      ref_conv_Window(ref_conv_Window), // do not pass explicit window, we construct it later
       params_C(ref_C.layout()),
       ref_C(ref_C),
       params_D(ref_D.layout()),
       ref_D(ref_D),
       output_op(output_op) {
+
+
+      // // TODO(klecki): not the most obvious place for problem size calculation
+      // // Left matrix is H x WC = M x K, virtual right is WC x WC = K x N, hence M, N, K := H, WC, WC
+      // problem_size_inner(matrix_dims[0], matrix_dims[1] * channels, matrix_dims[1] * channels),
+      // // Right matrix is H x WC = K x N, left is H x H = M x K; hence M, N, K := H, WC, H
+      // problem_size_outer(matrix_dims[0], matrix_dims[1] * channels, matrix_dims[0]),
+
       // if (InnerConv) {
       //   // Left matrix is H x WC = M x K, virtual right is WC x WC = K x N, hence M, N, K := H, WC, WC
       //   problem_size_inner = {matrix_dims[0], matrix_dims[1] * channels, matrix_dims[1] * channels},
@@ -141,8 +144,8 @@ struct Conv {
       // int total_gemm_k_iterations = (problem_size.k() + Mma::Shape::kK - 1) / Mma::Shape::kK;
       // int gemm_k_iterations = (total_gemm_k_iterations + grid_tiled_shape.k() - 1) / grid_tiled_shape.k();
 
-      gemm_k_size_inner = calc_gemm_k_size(problem_size_inner, grid_tiled_shape);
-      gemm_k_size_outer = calc_gemm_k_size(problem_size_outer, grid_tiled_shape);
+      gemm_k_size = calc_gemm_k_size(problem_size, grid_tiled_shape);
+      // gemm_k_size_outer = calc_gemm_k_size(problem_size_outer, grid_tiled_shape);
 
       semaphore = workspace;
     }
@@ -233,11 +236,11 @@ struct Conv {
     // we need to make this "more virtual"
     cutlass::MatrixCoord tb_offset_A{
       threadblock_tile_offset.m() * Mma::Shape::kM,
-      threadblock_tile_offset.k() * params.gemm_k_size_inner,
+      threadblock_tile_offset.k() * params.gemm_k_size,
     };
 
     cutlass::MatrixCoord tb_offset_B{
-      threadblock_tile_offset.k() * params.gemm_k_size_inner,
+      threadblock_tile_offset.k() * params.gemm_k_size,
       threadblock_tile_offset.n() * Mma::Shape::kN
     };
     // todo(klecki): and here are the tile coordinates, woohoo
@@ -247,8 +250,8 @@ struct Conv {
 
     // Problem size is a function of threadblock index in the K dimension
     int problem_size_k = min(
-      params.problem_size_inner.k(),
-      (threadblock_tile_offset.k() + 1) * params.gemm_k_size_inner);
+      params.problem_size.k(),
+      (threadblock_tile_offset.k() + 1) * params.gemm_k_size);
 
     // Compute threadblock-scoped matrix multiply-add
     int gemm_k_iterations = (problem_size_k - tb_offset_A.column() + Mma::Shape::kK - 1) / Mma::Shape::kK;
@@ -266,7 +269,7 @@ struct Conv {
     typename Mma::IteratorA iterator_A(
       params.params_In,
       params.ref_In.data(),
-      {params.problem_size_inner.m(), problem_size_k},
+      {params.problem_size.m(), problem_size_k},
       thread_idx,
       tb_offset_A);
 
@@ -277,16 +280,14 @@ struct Conv {
     // Load from  params.windows[1] to window.data()
     // Construct the windows:
     // TensorRef
-    auto window = shared_storage.main_loop.operand_Window_ref(params.window_sizes[1]);
+    auto window = shared_storage.main_loop.operand_Window_ref(params.window_size);
 
     // int const kWindowLength = Mma::SharedStorage::ShapeWindow;
     // The PredicateTileIterator expects PitchLinearShape and PitchLinear layout.
     // The target shape is RowMajor<1, ConvMmaBase::kWindowLength>, we map it to PitchLinear
     // using WindowShape = typename Mma::SharedStorage::ShapeWindow;
     using WindowShape = layout::PitchLinearShape<kThreadCount, 1>;
-    using WindowLayout = layout::PitchLinear;
 
-    using WindowElement = typename Mma::IteratorB::Element;
     // using Element = int;
     // TODO(klecki): this is only defined in some lower layer
 
@@ -309,9 +310,9 @@ struct Conv {
     // it's (contiguous, strided)
     // TODO(klecki): !!! This works only when the tile is bigger then the extent
     // I don't know why
-    cutlass::Coord<2> window_extent = cutlass::make_Coord(params.window_sizes[1], 1);
+    cutlass::Coord<2> window_extent = cutlass::make_Coord(params.window_size, 1);
 
-    int iterations = (params.window_sizes[1] + WindowShape::kContiguous - 1) / WindowShape::kContiguous;
+    int iterations = (params.window_size + WindowShape::kContiguous - 1) / WindowShape::kContiguous;
 
     PRINT_IF
       printf(">>> Loading iterations: %d\n", iterations);
@@ -322,7 +323,7 @@ struct Conv {
       using WindowSmemIterator = transform::threadblock::RegularTileIterator<
           WindowShape, WindowElement, WindowLayout, 0, WindowThreadMap>;
 
-      WindowGmemIterator src_iterator(WindowLayout(1024), params.windows[1], window_extent, thread_idx);
+      WindowGmemIterator src_iterator(params.ref_conv_Window.layout(), params.ref_conv_Window.data(), window_extent, thread_idx);
       // WindowSmemIterator dst_iterator(shared_storage.main_loop.operand_Window_ref(1024), thread_idx);
       WindowGmemIterator dst_iterator(WindowLayout(1024), window.data(), window_extent, thread_idx);
       // dst_iterator.set_iteration_index(iterations);
@@ -371,15 +372,15 @@ struct Conv {
 
     typename Mma::IteratorB iterator_B(
       // Fake stride
-      params.params_Window_inner,
+      params.params_Window,
       // Pointer to the smem that would be sampled
       window.data(),
       // Emulated matrix shape
-      {problem_size_k, params.problem_size_inner.n()},
+      {problem_size_k, params.problem_size.n()},
       thread_idx,
       tb_offset_B,
       // size of the window used
-      params.window_sizes[1]);
+      params.window_size);
 
     // Broadcast the warp_id computed by lane 0 to ensure dependent code
     // is compiled as warp-uniform.
@@ -441,7 +442,7 @@ struct Conv {
     typename Epilogue::OutputTileIterator iterator_C(
       params.params_C,
       params.ref_C.data(),
-      params.problem_size_inner.mn(),
+      params.problem_size.mn(),
       thread_idx,
       threadblock_offset
     );
@@ -450,7 +451,7 @@ struct Conv {
     typename Epilogue::OutputTileIterator iterator_D(
       params.params_D,
       params.ref_D.data(),
-      params.problem_size_inner.mn(),
+      params.problem_size.mn(),
       thread_idx,
       threadblock_offset
     );

@@ -136,6 +136,7 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 
   static int const kThreads = MmaCore::kThreads;
   static int const kElementsPerAccess = MmaCore::kElementsPerAccess;
+  static int const kInnerConv = InnerConv;
 
   // Define iterators over tiles from the A operand
   using IteratorA_regular_gmem_ =
@@ -149,7 +150,7 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
           ElementA, LayoutA, 1, typename MmaCore::IteratorThreadMapA, kAlignmentB>;
 
   // Define iterators over tiles from the B operand
-  using IteratorA = std::conditional_t<InnerConv, IteratorA_regular_gmem_, IteratorA_outer_conv_smem_>;
+  using IteratorA = std::conditional_t<kInnerConv, IteratorA_regular_gmem_, IteratorA_outer_conv_smem_>;
 
 
   // Define iterators over tiles from the B operand
@@ -163,8 +164,7 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
           ElementB, LayoutB, 0, typename MmaCore::IteratorThreadMapB, kAlignmentB>;
 
   // Define iterators over tiles from the B operand
-  using IteratorB = std::conditional_t<InnerConv, IteratorB_inner_conv_smem_, IteratorB_regular_gmem_>;
-
+  using IteratorB = std::conditional_t<kInnerConv, IteratorB_inner_conv_smem_, IteratorB_regular_gmem_>;
 
 //   using TileShapeB = cutlass::layout::PitchLinearShape<MmaCore::Shape::kK, 1>; // we only load one row of window - hmm, it's bad that it's the other way round
 //   using TileLayoutB = cutlass::layout::PitchLinear;
@@ -193,7 +193,7 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
   using ThreadblockMma = cutlass::gemm::threadblock::ConvMmaPipelined<
       typename MmaCore::Shape, IteratorA, typename MmaCore::SmemIteratorA,
       IteratorB, typename MmaCore::SmemIteratorB, ElementAccumulator,
-      layout::RowMajor, typename MmaCore::MmaPolicy>;
+      layout::RowMajor, typename MmaCore::MmaPolicy, kInnerConv>;
 };
 
 // ////////////////////////////////////////////////////////////////////////////////
@@ -223,7 +223,9 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 //     /// Instruction-level tile size (concept: GemmShape)
 //     typename InstructionShape,
 //     /// Operation performed by GEMM
-//     typename Operator
+//     typename Operator,
+//     /// Type of Convolution
+//     bool InnerConv
 //     >
 // struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 //                   kAlignmentB, ElementAccumulator, layout::RowMajor,
@@ -274,7 +276,9 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 //     /// Instruction-level tile size (concept: GemmShape)
 //     typename InstructionShape,
 //     /// Operation performed by GEMM
-//     typename Operator
+//     typename Operator,
+//     /// Type of Convolution
+//     bool InnerConv
 //     >
 // struct DefaultConvMma<float, LayoutA, kAlignmentA, float, LayoutB,
 //                   kAlignmentB, float, layout::RowMajor,
@@ -402,7 +406,9 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 //     /// Number of stages used in the multistage mainloop
 //     int Stages,
 //     /// Operation perfomed by GEMM
-//     typename Operator
+//     typename Operator,
+//     /// Type of Convolution
+//     bool InnerConv
 //     >
 // struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 //                   kAlignmentB, ElementAccumulator, layout::RowMajor,
@@ -467,7 +473,9 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 //     /// Number of stages used in the multistage mainloop
 //     int Stages,
 //     /// Operation perfomed by GEMM
-//     typename Operator
+//     typename Operator,
+//     /// Type of Convolution
+//     bool InnerConv
 //     >
 // struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 //                   kAlignmentB, ElementAccumulator, layout::RowMajor,

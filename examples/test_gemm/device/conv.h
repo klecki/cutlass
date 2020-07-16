@@ -306,7 +306,7 @@ class Conv {
     // Data members
     //
     // GemmCoord problem_size;
-    Array<int, kAxes> matrix_dims;
+    Array<int, kAxes> matrix_size;
     Array<int, kAxes> window_sizes;
     int channels;
     TensorRef<ElementIn const, LayoutIn> ref_In;
@@ -328,7 +328,7 @@ class Conv {
     /// Constructs an Arguments structure
     CUTLASS_HOST_DEVICE
     Arguments(
-      Array<int, kAxes> matrix_dims_,
+      Array<int, kAxes> matrix_size_,
       Array<int, kAxes> window_sizes_,
       int channels_,
       TensorRef<ElementIn const, LayoutIn> ref_In_,
@@ -338,7 +338,7 @@ class Conv {
       typename EpilogueOutputOp::Params epilogue_ =
         typename EpilogueOutputOp::Params()
     ):
-      matrix_dims(matrix_dims_),
+      matrix_size(matrix_size_),
       window_sizes(window_sizes_),
       channels(channels_),
       ref_In(ref_In_),
@@ -420,7 +420,7 @@ public:
 
     // The basic threadblock swizzle takes only M and N dims into account here
     int dummy_k = 1;
-    GemmCoord problem_size(args.matrix_dims[0], args.matrix_dims[1] * args.channels, dummy_k);
+    GemmCoord problem_size(args.matrix_size[0], args.matrix_size[1] * args.channels, dummy_k);
     cutlass::gemm::GemmCoord grid_shape = threadblock_swizzle.get_tiled_shape(
       problem_size,
       {ThreadblockShape::kM, ThreadblockShape::kN, ThreadblockShape::kK},
@@ -456,32 +456,30 @@ public:
 
     // Initialize the Params structure
     params_inner_ = typename GemmKernelInner::Params{
-      args.matrix_dims,
-      args.window_sizes,
       args.channels,
+      GetProblemSize(args.matrix_size, args.channels, true),
       grid_shape,
       args.ref_In.non_const_ref(),
-      // args.ref_In.non_const_ref(),
-      args.ref_Windows,
+      {args.ref_Windows[1], {args.window_sizes[1]}}, // build window ref on the fly
       args.ref_C.non_const_ref(),
       args.ref_D,
       args.epilogue,
       static_cast<int *>(workspace)
     };
 
-    params_outer_ = typename GemmKernelOuter::Params{
-      args.matrix_dims,
-      args.window_sizes,
-      args.channels,
-      grid_shape,
-      args.ref_In.non_const_ref(),
-      // args.ref_In.non_const_ref(),
-      args.ref_Windows,
-      args.ref_C.non_const_ref(),
-      args.ref_D,
-      args.epilogue,
-      static_cast<int *>(workspace)
-    };
+    // params_outer_ = typename GemmKernelOuter::Params{
+    //   args.matrix_size,
+    //   args.window_sizes,
+    //   args.channels,
+    //   grid_shape,
+    //   args.ref_In.non_const_ref(),
+    //   // args.ref_In.non_const_ref(),
+    //   args.ref_Windows,
+    //   args.ref_C.non_const_ref(),
+    //   args.ref_D,
+    //   args.epilogue,
+    //   static_cast<int *>(workspace)
+    // };
 
     return Status::kSuccess;
   }
@@ -561,6 +559,16 @@ public:
     }
 
     return status;
+  }
+
+  GemmCoord GetProblemSize(const Array<int, kAxes> &matrix_size, int channels, bool inner) {
+    if (inner) {
+      // (m, n, n) where n = width * channels
+      return {matrix_size[0], matrix_size[1] * channels, matrix_size[1] * channels};
+    } else {
+      // m, n, m where n = width * channels
+      return {matrix_size[0], matrix_size[1] * channels, matrix_size[0]};
+    }
   }
 };
 
