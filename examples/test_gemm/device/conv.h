@@ -251,7 +251,7 @@ class Conv {
   static int const kAxes = Axes;
 
   /// Define the kernel, SIMT
-  using GemmKernel = typename kernel::DefaultConv<
+  using GemmKernelInner = typename kernel::DefaultConv<
     ElementIn,
     LayoutIn,
     kAlignmentA,
@@ -271,7 +271,32 @@ class Conv {
     kStages,
     kSplitKSerial,
     Operator,
-    kIsBetaZero
+    kIsBetaZero,
+    true
+  >::GemmKernel;
+
+  using GemmKernelOuter = typename kernel::DefaultConv<
+    ElementIn,
+    LayoutIn,
+    kAlignmentA,
+    ElementWindow,
+    LayoutWindow,
+    kAlignmentB,
+    ElementOut,
+    LayoutOut,
+    ElementAccumulator,
+    OperatorClass,
+    ArchTag,
+    ThreadblockShape,
+    WarpShape,
+    InstructionShape,
+    EpilogueOutputOp,
+    ThreadblockSwizzle,
+    kStages,
+    kSplitKSerial,
+    Operator,
+    kIsBetaZero,
+    false
   >::GemmKernel;
 
   /// Argument structure
@@ -328,7 +353,8 @@ class Conv {
 private:
 
   /// Kernel parameters object
-  typename GemmKernel::Params params_;
+  typename GemmKernelInner::Params params_inner_;
+  typename GemmKernelOuter::Params params_outer_;
 
 public:
 
@@ -429,7 +455,21 @@ public:
     // }
 
     // Initialize the Params structure
-    params_ = typename GemmKernel::Params{
+    params_inner_ = typename GemmKernelInner::Params{
+      args.matrix_dims,
+      args.window_sizes,
+      args.channels,
+      grid_shape,
+      args.ref_In.non_const_ref(),
+      // args.ref_In.non_const_ref(),
+      args.ref_Windows,
+      args.ref_C.non_const_ref(),
+      args.ref_D,
+      args.epilogue,
+      static_cast<int *>(workspace)
+    };
+
+    params_outer_ = typename GemmKernelOuter::Params{
       args.matrix_dims,
       args.window_sizes,
       args.channels,
@@ -472,14 +512,14 @@ public:
 
     ThreadblockSwizzle threadblock_swizzle;
 
-    dim3 grid = threadblock_swizzle.get_grid_shape(params_.grid_tiled_shape);
-    dim3 block(GemmKernel::kThreadCount, 1, 1);
+    dim3 grid = threadblock_swizzle.get_grid_shape(params_inner_.grid_tiled_shape);
+    dim3 block(GemmKernelInner::kThreadCount, 1, 1);
 
     cudaError_t result;
 
-    int smem_size = int(sizeof(typename GemmKernel::SharedStorage));
+    int smem_size = int(sizeof(typename GemmKernelInner::SharedStorage));
     if (smem_size >= (48 << 10)) {
-      result = cudaFuncSetAttribute(Kernel<GemmKernel>,
+      result = cudaFuncSetAttribute(Kernel<GemmKernelInner>,
                                     cudaFuncAttributeMaxDynamicSharedMemorySize,
                                     smem_size);
 
@@ -488,7 +528,7 @@ public:
       }
 
       result = cudaFuncSetAttribute(
-          Kernel<GemmKernel>,
+          Kernel<GemmKernelInner>,
           cudaFuncAttributePreferredSharedMemoryCarveout, 100);
 
       if (result != cudaSuccess) {
@@ -496,7 +536,7 @@ public:
       }
     }
 
-    cutlass::Kernel<GemmKernel><<<grid, block, smem_size, stream>>>(params_);
+    cutlass::Kernel<GemmKernelInner><<<grid, block, smem_size, stream>>>(params_inner_);
 
     result = cudaGetLastError();
 
