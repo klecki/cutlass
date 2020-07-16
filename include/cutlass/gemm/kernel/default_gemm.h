@@ -176,7 +176,7 @@ struct DefaultGemm<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB, kAlignment
 
   /// Define the kernel-level GEMM operator.
   using GemmKernel = kernel::Gemm<Mma, Epilogue, ThreadblockSwizzle, SplitKSerial>;
-  constexpr static int x__ = Debugx<80, Mma, Epilogue, GemmKernel>::f();
+  // constexpr static int x__ = Debugx<80, Mma, Epilogue, GemmKernel>::f();
 };
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -262,7 +262,7 @@ struct DefaultGemm<
 
   /// Define the kernel-level GEMM operator.
   using GemmKernel = kernel::Gemm<Mma, Epilogue, ThreadblockSwizzle, SplitKSerial>;
-  constexpr static int x__ = Debugx<75, Mma, Epilogue, GemmKernel>::f();
+  // constexpr static int x__ = Debugx<75, Mma, Epilogue, GemmKernel>::f();
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -331,7 +331,7 @@ struct DefaultGemm<
 
   /// Define the kernel-level GEMM operator.
   using GemmKernel = kernel::Gemm<Mma, Epilogue, ThreadblockSwizzle, SplitKSerial>;
-  constexpr static int x__ = Debugx<801, Mma, Epilogue, GemmKernel>::f();
+  // constexpr static int x__ = Debugx<801, Mma, Epilogue, GemmKernel>::f();
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -397,7 +397,7 @@ struct DefaultGemm<ElementA, layout::ColumnMajorInterleaved<InterleavedK>,
 
   /// Define the kernel-level GEMM operator.
   using GemmKernel = kernel::Gemm<Mma, Epilogue, ThreadblockSwizzle, SplitKSerial>;
-  constexpr static int x__ = Debugx<751, Mma, Epilogue, GemmKernel>::f();
+  // constexpr static int x__ = Debugx<751, Mma, Epilogue, GemmKernel>::f();
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -484,7 +484,7 @@ struct DefaultGemm<
   /// Define the kernel-level GEMM operator.
   using GemmKernel = kernel::Gemm<Mma, Epilogue, ThreadblockSwizzle, SplitKSerial>;
 
-  constexpr static int x__ = Debugx<70, Mma, Epilogue, GemmKernel>::f();
+  // constexpr static int x__ = Debugx<70, Mma, Epilogue, GemmKernel>::f();
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -574,7 +574,7 @@ struct DefaultGemm<
   /// Define the kernel-level GEMM operator.
   using GemmKernel = kernel::Gemm<Mma, Epilogue, ThreadblockSwizzle, SplitKSerial>;
 
-  constexpr static int x__ = Debugx<50, Mma, Epilogue, GemmKernel>::f();
+  // constexpr static int x__ = Debugx<50, Mma, Epilogue, GemmKernel>::f();
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -651,7 +651,7 @@ struct DefaultGemm<ElementA,
 
   /// Define the kernel-level GEMM operator.
   using GemmKernel = kernel::Gemm<Mma, Epilogue, ThreadblockSwizzle, SplitKSerial>;
-  constexpr static int x__ = Debugx<800, Mma, Epilogue, GemmKernel>::f();
+  // constexpr static int x__ = Debugx<800, Mma, Epilogue, GemmKernel>::f();
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -731,7 +731,7 @@ struct DefaultGemm<int8_t, LayoutA, kAlignmentA, int8_t, LayoutB, kAlignmentB,
   using GemmKernel = kernel::Gemm<Mma, Epilogue, ThreadblockSwizzle, SplitKSerial>;
 
 
-  constexpr static int x__ = Debugx<504, Mma, Epilogue, GemmKernel>::f();
+  // constexpr static int x__ = Debugx<504, Mma, Epilogue, GemmKernel>::f();
 };
 
 #if defined(CUTLASS_ARCH_WMMA_ENABLED)
@@ -814,7 +814,7 @@ struct DefaultGemm<
 
   /// Define the kernel-level GEMM operator.
   using GemmKernel = kernel::Gemm<Mma, Epilogue, ThreadblockSwizzle, SplitKSerial>;
-  constexpr static int x__ = Debugx<30, Mma, Epilogue, GemmKernel>::f();
+  // constexpr static int x__ = Debugx<30, Mma, Epilogue, GemmKernel>::f();
 };
 ////////////////////////////////////////////////////////////////////////////////
 #endif //CUTLASS_ARCH_WMMA_ENABLED

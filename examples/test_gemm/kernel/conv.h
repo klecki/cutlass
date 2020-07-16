@@ -133,6 +133,10 @@ struct Conv {
       params_D(ref_D.layout()),
       ref_D(ref_D),
       output_op(output_op) {
+      // if (InnerConv) {
+      //   // Left matrix is H x WC = M x K, virtual right is WC x WC = K x N, hence M, N, K := H, WC, WC
+      //   problem_size_inner = {matrix_dims[0], matrix_dims[1] * channels, matrix_dims[1] * channels},
+      // }
 
       // int total_gemm_k_iterations = (problem_size.k() + Mma::Shape::kK - 1) / Mma::Shape::kK;
       // int gemm_k_iterations = (total_gemm_k_iterations + grid_tiled_shape.k() - 1) / grid_tiled_shape.k();
