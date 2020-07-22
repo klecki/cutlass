@@ -78,9 +78,9 @@
 
 static constexpr int kWindowSize = 17;
 
-using A_type = float;
-using B_type = float;
-using C_type = float;
+using A_type = cutlass::half_t;
+using B_type = cutlass::half_t;
+using C_type = cutlass::half_t;
 
 /// Define a CUTLASS GEMM template and launch a GEMM kernel.
 cudaError_t CutlassSgemmNN(
@@ -131,26 +131,26 @@ cudaError_t CutlassSgemmNN(
   // !!!! WE NEED THIS SO IT CAN ACTUALLY RUN ON Tensor Cores, the default is different
   using ShapeMMAOp = cutlass::gemm::GemmShape<8, 8, 4>;  // <- MMA Op tile M = 8, N = 8, K = 4
 
-  using CutlassConv = cutlass::gemm::device::Conv<A_type,        // Data-type of A matrix
-                                                  RowMajor,  // Layout of A matrix
-                                                  B_type,        // Data-type of B matrix
-                                                  C_type,        // Data-type of C matrix
-                                                  RowMajor, 2, false>; // Layout of C matrix
-
-
   // using CutlassConv = cutlass::gemm::device::Conv<A_type,        // Data-type of A matrix
   //                                                 RowMajor,  // Layout of A matrix
   //                                                 B_type,        // Data-type of B matrix
   //                                                 C_type,        // Data-type of C matrix
-  //                                                 RowMajor,    // Layout of C matrix
-  //                                                 2, false, // axes, InnerConv
-  //                                                 C_type,  // element acumulator
-  //                                                 MMAOp, // tensor op
-  //                                                 SmArch, // arch 70
-  //                                                 ShapeMMAThreadBlock, // we can probably leave default shapes, but we need gemm 8x8x4
-  //                                                 ShapeMMAWarp,
-  //                                                 ShapeMMAOp
-  //                                                 >;
+  //                                                 RowMajor, 2, false>; // Layout of C matrix
+
+
+  using CutlassConv = cutlass::gemm::device::Conv<A_type,        // Data-type of A matrix
+                                                  RowMajor,  // Layout of A matrix
+                                                  B_type,        // Data-type of B matrix
+                                                  C_type,        // Data-type of C matrix
+                                                  RowMajor,    // Layout of C matrix
+                                                  2, false, // axes, InnerConv
+                                                  C_type,  // element acumulator
+                                                  MMAOp, // tensor op
+                                                  SmArch, // arch 70
+                                                  ShapeMMAThreadBlock, // we can probably leave default shapes, but we need gemm 8x8x4
+                                                  ShapeMMAWarp,
+                                                  ShapeMMAOp
+                                                  >;
 
   // Define a CUTLASS GEMM type
   CutlassConv gemm_operator;
@@ -382,12 +382,12 @@ __global__ void ReferenceGemm_kernel(
   int M,
   int N,
   int K,
-  float alpha,
+  A_type alpha,
   A_type const *A,
   int lda,
   B_type const *B,
   int ldb,
-  float beta,
+  C_type beta,
   C_type *C,
   int ldc) {
 
@@ -395,10 +395,10 @@ __global__ void ReferenceGemm_kernel(
   int j = threadIdx.y + blockIdx.y * blockDim.y;
 
   if (i < M && j < N) {
-    C_type accumulator = 0;
+    C_type accumulator = {};
 
     for (int k = 0; k < K; ++k) {
-      accumulator += (float)A[i * lda + k] * (float)B[k * ldb + j];
+      accumulator += A[i * lda + k] * B[k * ldb + j];
     }
 
     C[i * ldc + j] = alpha * accumulator + beta * C[i * ldc + j];
@@ -410,12 +410,12 @@ cudaError_t ReferenceGemm(
   int M,
   int N,
   int K,
-  float alpha,
+  A_type alpha,
   A_type const *A,
   int lda,
   B_type const *B,
   int ldb,
-  float beta,
+  C_type beta,
   C_type *C,
   int ldc) {
 
@@ -465,11 +465,11 @@ __global__ void ReferenceConv_kernel_inner(
   int M, // rows
   int N, // cols
   int radius,
-  float alpha,
+  A_type alpha,
   A_type const *A,
   int lda,
   B_type const *window,
-  float beta,
+  C_type beta,
   C_type *C,
   int ldc) {
 
@@ -477,10 +477,10 @@ __global__ void ReferenceConv_kernel_inner(
   int col = threadIdx.y + blockIdx.y * blockDim.y;
 
   if (row < M && col < N) {
-    C_type accumulator = 0;
+    C_type accumulator = {};
 
     for (int k = -radius; k <= radius; ++k) {
-      accumulator += (float)A[row * lda + idx_reflect_101(col + k, N)] * (float)window[k];
+      accumulator += A[row * lda + idx_reflect_101(col + k, N)] * window[k];
     }
 
     C[row * ldc + col] = alpha * accumulator + beta * C[row * ldc + col];
@@ -493,11 +493,11 @@ __global__ void ReferenceConv_kernel_outer(
   int M, // rows
   int N, // cols
   int radius,
-  float alpha,
+  A_type alpha,
   A_type const *A,
   int lda,
   B_type const *window,
-  float beta,
+  C_type beta,
   C_type *C,
   int ldc) {
 
@@ -505,10 +505,10 @@ __global__ void ReferenceConv_kernel_outer(
   int col = threadIdx.y + blockIdx.y * blockDim.y;
 
   if (row < M && col < N) {
-    C_type accumulator = 0;
+    C_type accumulator = {};
 
     for (int k = -radius; k <= radius; ++k) {
-      accumulator += (float)A[idx_reflect_101(row + k, M) * lda + col] * (float)window[k];
+      accumulator += A[idx_reflect_101(row + k, M) * lda + col] * window[k];
     }
 
     C[row * ldc + col] = alpha * accumulator + beta * C[row * ldc + col];
@@ -521,11 +521,11 @@ cudaError_t ReferenceConv(
   int M,
   int N,
   int radius,
-  float alpha,
+  A_type alpha,
   A_type const *A,
   int lda,
   B_type const *window,
-  float beta,
+  C_type beta,
   C_type *C,
   int ldc, bool inner) {
 
@@ -763,7 +763,7 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta) {
     for (int col = 0; col < N; col++) {
       if (host_cutlass[row * ldc + col] != host_reference[row * ldc + col]) {
         std::cerr << "CUTLASS results incorrect: (" << row << ", " << col << "): "
-          << host_cutlass[row * ldc + col] << " != " << host_reference[row * ldc + col] << std::endl;
+          << static_cast<float>(host_cutlass[row * ldc + col]) << " != " << static_cast<float>(host_reference[row * ldc + col]) << std::endl;
           return cudaErrorUnknown;
       }
     }
