@@ -138,7 +138,7 @@ template <
     bool InnerConv = true
     >
 struct SpecializedConvMma {
-  using UnderlyingMma = DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB, kAlignmentB,
+  using UnderlyingMma = DefaultMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB, kAlignmentB,
 				ElementAccumulator, LayoutC, OperatorClass, ArchTag, ThreadblockShape, WarpShape,
 				InstructionShape, Stages, Operator, AccumulatorsInRowMajor>;
 
