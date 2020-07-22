@@ -42,6 +42,8 @@
 #include "cutlass/gemm/threadblock/default_mma_core_sm75.h"
 #include "cutlass/gemm/threadblock/default_mma_core_sm80.h"
 
+#include "cutlass/gemm/threadblock/default_mma.h"
+
 
 #if defined(CUTLASS_ARCH_WMMA_ENABLED)
 #include "cutlass/gemm/threadblock/default_mma_core_wmma.h"
@@ -54,7 +56,6 @@ namespace gemm {
 namespace threadblock {
 
 ////////////////////////////////////////////////////////////////////////////////
-
 template <
     /// Element type for A matrix operand
     typename ElementA_,
@@ -93,6 +94,85 @@ template <
     bool InnerConv = true
     >
 struct DefaultConvMma;
+
+
+/// Wraps DefaultMma by adding the PositionPredicatedTile iterator and selection
+/// between Inner and Outer Conv.
+/// Redirects the appropriate iterators to IteratorA (default for InnerConv)
+///  and IteratorB (default for !InnerConv)
+template <
+    /// Element type for A matrix operand
+    typename ElementA,
+    /// Layout type for A matrix operand
+    typename LayoutA,
+    /// Access granularity of A matrix in units of elements
+    int kAlignmentA,
+    /// Element type for B matrix operand
+    typename ElementB,
+    /// Layout type for B matrix operand
+    typename LayoutB,
+    /// Access granularity of B matrix in units of elements
+    int kAlignmentB,
+    /// Element type for internal accumulation
+    typename ElementAccumulator,
+    /// Layout type for C and D matrix operands
+    typename LayoutC,
+    /// Operator class tag
+    typename OperatorClass,
+    /// Tag indicating architecture to tune for
+    typename ArchTag,
+    /// Threadblock-level tile size (concept: GemmShape)
+    typename ThreadblockShape,
+    /// Warp-level tile size (concept: GemmShape)
+    typename WarpShape,
+    /// Instruction-level tile size (concept: GemmShape)
+    typename InstructionShape,
+    /// Number of stages used in the pipelined mainloop
+    int Stages,
+    /// Operation perfomed by GEMM
+    typename Operator,
+    /// Store the accumulators in row major or column major.  Row major is used
+    /// when output layout is interleaved.
+    bool AccumulatorsInRowMajor = false,
+    /// If the convolution is computed in the innermost or outer dimension
+    bool InnerConv = true
+    >
+struct SpecializedConvMma {
+  using UnderlyingMma = DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB, kAlignmentB,
+				ElementAccumulator, LayoutC, OperatorClass, ArchTag, ThreadblockShape, WarpShape,
+				InstructionShape, Stages, Operator, AccumulatorsInRowMajor>;
+
+	 // Define the MmaCore components
+  using MmaCore = typename UnderlyingMma::MmaCore;
+
+  static int const kInnerConv = InnerConv;
+
+	// PositionPredicatedTileIterators that build matrix on the fly from SMEM
+	using IteratorA_outer_conv_smem_ =
+      cutlass::transform::threadblock::PositionPredicatedTileIterator<
+          cutlass::MatrixShape<MmaCore::Shape::kM, MmaCore::Shape::kK>,
+          ElementA, LayoutA, 1, typename MmaCore::IteratorThreadMapA, kAlignmentA>;
+
+	using IteratorB_inner_conv_smem_ =
+      cutlass::transform::threadblock::PositionPredicatedTileIterator<
+          cutlass::MatrixShape<MmaCore::Shape::kK, MmaCore::Shape::kN>,
+          ElementB, LayoutB, 0, typename MmaCore::IteratorThreadMapB, kAlignmentB>;
+
+
+  // Define iterators over tiles from the B operand
+  using IteratorA = std::conditional_t<kInnerConv, typename UnderlyingMma::IteratorA, IteratorA_outer_conv_smem_>;
+
+  // Define iterators over tiles from the B operand
+  using IteratorB = std::conditional_t<kInnerConv, IteratorB_inner_conv_smem_, typename UnderlyingMma::IteratorB>;
+
+	// We pass here all the iterators and there is the actual impl of load GMEM->SMEM happening
+	// Overwrite the one from UnderlyingMma
+  using ThreadblockMma = cutlass::gemm::threadblock::ConvMmaPipelined<
+      typename MmaCore::Shape, IteratorA, typename MmaCore::SmemIteratorA,
+      IteratorB, typename MmaCore::SmemIteratorB, ElementAccumulator,
+      layout::RowMajor, typename MmaCore::MmaPolicy, kInnerConv>;
+};
+
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -147,7 +227,7 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
   using IteratorA_outer_conv_smem_ =
       cutlass::transform::threadblock::PositionPredicatedTileIterator<
           cutlass::MatrixShape<MmaCore::Shape::kM, MmaCore::Shape::kK>,
-          ElementA, LayoutA, 1, typename MmaCore::IteratorThreadMapA, kAlignmentB>;
+          ElementA, LayoutA, 1, typename MmaCore::IteratorThreadMapA, kAlignmentA>;
 
   // Define iterators over tiles from the B operand
   using IteratorA = std::conditional_t<kInnerConv, IteratorA_regular_gmem_, IteratorA_outer_conv_smem_>;

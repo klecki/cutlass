@@ -167,7 +167,7 @@ struct DefaultConvConfiguration<
 
   using ThreadblockShape = GemmShape<128, 256, 32>;
   using WarpShape = GemmShape<64, 64, 32>;
-  using InstructionShape = GemmShape<16, 16, 4>;
+  using InstructionShape = GemmShape<16, 16, 4>; // TODO(klecki): It's specified only for <8, 8, 4>??
   static int const kStages = 2;
 
   using EpilogueOutputOp = epilogue::thread::LinearCombination<
@@ -500,30 +500,30 @@ struct DefaultConvConfiguration<
 // };
 
 
-template <>
-struct DefaultConvConfiguration<
-    arch::OpClassTensorOp,
-    arch::Sm80,
-    complex<double>,
-    complex<double>,
-    complex<double>,
-    complex<double>
-  > {
+// template <>
+// struct DefaultConvConfiguration<
+//     arch::OpClassTensorOp,
+//     arch::Sm80,
+//     complex<double>,
+//     complex<double>,
+//     complex<double>,
+//     complex<double>
+//   > {
 
-  static int const kAlignmentA = 1;
-  static int const kAlignmentB = 1;
+//   static int const kAlignmentA = 1;
+//   static int const kAlignmentB = 1;
 
-  using ThreadblockShape = GemmShape<64, 64, 16>;
-  using WarpShape = GemmShape<32, 32, 16>;
-  using InstructionShape = GemmShape<8, 8, 4>;
-  static int const kStages = 3;
+//   using ThreadblockShape = GemmShape<64, 64, 16>;
+//   using WarpShape = GemmShape<32, 32, 16>;
+//   using InstructionShape = GemmShape<8, 8, 4>;
+//   static int const kStages = 3;
 
-  using EpilogueOutputOp = epilogue::thread::LinearCombination<
-      complex<double>, 1, complex<double>,
-      complex<double>>;
+//   using EpilogueOutputOp = epilogue::thread::LinearCombination<
+//       complex<double>, 1, complex<double>,
+//       complex<double>>;
 
-  using Operator = arch::OpMultiplyAddComplex;
-};
+//   using Operator = arch::OpMultiplyAddComplex;
+// };
 
 // ////////////////////////////////////////////////////////////////////////////////
 
