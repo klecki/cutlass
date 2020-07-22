@@ -78,8 +78,8 @@
 
 static constexpr int kWindowSize = 17;
 
-using A_type = cutlass::half_t;
-using B_type = cutlass::half_t;
+using A_type = float;
+using B_type = float;
 using C_type = float;
 
 /// Define a CUTLASS GEMM template and launch a GEMM kernel.
@@ -131,26 +131,26 @@ cudaError_t CutlassSgemmNN(
   // !!!! WE NEED THIS SO IT CAN ACTUALLY RUN ON Tensor Cores, the default is different
   using ShapeMMAOp = cutlass::gemm::GemmShape<8, 8, 4>;  // <- MMA Op tile M = 8, N = 8, K = 4
 
-  // using CutlassConv = cutlass::gemm::device::Conv<A_type,        // Data-type of A matrix
-  //                                                 RowMajor,  // Layout of A matrix
-  //                                                 B_type,        // Data-type of B matrix
-  //                                                 C_type,        // Data-type of C matrix
-  //                                                 RowMajor, 2, false>; // Layout of C matrix
-
-
   using CutlassConv = cutlass::gemm::device::Conv<A_type,        // Data-type of A matrix
                                                   RowMajor,  // Layout of A matrix
                                                   B_type,        // Data-type of B matrix
                                                   C_type,        // Data-type of C matrix
-                                                  RowMajor,    // Layout of C matrix
-                                                  2, false, // axes, InnerConv
-                                                  C_type,  // element acumulator
-                                                  MMAOp, // tensor op
-                                                  SmArch, // arch 70
-                                                  ShapeMMAThreadBlock, // we can probably leave default shapes, but we need gemm 8x8x4
-                                                  ShapeMMAWarp,
-                                                  ShapeMMAOp
-                                                  >;
+                                                  RowMajor, 2, false>; // Layout of C matrix
+
+
+  // using CutlassConv = cutlass::gemm::device::Conv<A_type,        // Data-type of A matrix
+  //                                                 RowMajor,  // Layout of A matrix
+  //                                                 B_type,        // Data-type of B matrix
+  //                                                 C_type,        // Data-type of C matrix
+  //                                                 RowMajor,    // Layout of C matrix
+  //                                                 2, false, // axes, InnerConv
+  //                                                 C_type,  // element acumulator
+  //                                                 MMAOp, // tensor op
+  //                                                 SmArch, // arch 70
+  //                                                 ShapeMMAThreadBlock, // we can probably leave default shapes, but we need gemm 8x8x4
+  //                                                 ShapeMMAWarp,
+  //                                                 ShapeMMAOp
+  //                                                 >;
 
   // Define a CUTLASS GEMM type
   CutlassConv gemm_operator;
@@ -230,9 +230,9 @@ __global__ void InitializeMatrix_kernel(
     // T value = T(((offset + seed) * k % m) - m / 2); // TODO modulo something
     // T value = row * 100 + col;
 
-    T value = cutlass::half_t::convert(0.f);
+    T value = static_cast<T>(0.f);
     if (row == col)
-      value = cutlass::half_t::convert(1.f);
+      value =  static_cast<T>(1.f);
 
     matrix[offset] = value;
 
@@ -258,7 +258,7 @@ __global__ void InitializeMatrix_kernel_col_invariant(
     // int const m = 16;
     // T value = T(((col + seed) * k % m) - m / 2); // TODO modulo something
     int diag_dist = row - col;
-    T value = cutlass::half_t::convert(0.f);
+    T value =  static_cast<T>(0.f);
     // int window_size = kWindowSize;
     // int radius = window_size / 2;
     // if (diag_dist == 0) {
@@ -602,15 +602,15 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta) {
   result = cudaMalloc(reinterpret_cast<void **>(&window), sizeof(B_type) * max_window);
   std::vector<B_type> window_host(max_window);
   for (int i = 0; i < radius; i++) {
-    window_host[i] = cutlass::half_t::convert(i);
-    window_host[window_size - 1 - i] = cutlass::half_t::convert(i);
+    window_host[i] =  static_cast<B_type>(i);
+    window_host[window_size - 1 - i] =  static_cast<B_type>(i);
   }
-  window_host[radius] = cutlass::half_t::convert(100);
+  window_host[radius] =  static_cast<B_type>(100);
   // for (int i = 0; i < window_size; i++) {
   //   printf("Window[%d] = %f\n", i, window_host[i]);
   // }
   for (int i = window_size; i < max_window; i++) {
-    window_host[i] = cutlass::half_t::convert(-42.f);
+    window_host[i] =  static_cast<B_type>(-42.f);
   }
 
   result = cudaMemcpy(window, window_host.data(), sizeof(B_type) * max_window, cudaMemcpyHostToDevice);
@@ -751,8 +751,8 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta) {
   // dbg(host_cutlass);
   std::cout << "CUTLASS A" << std::endl;
   print_mat(M, K, host_a);
-  // std::cout << "CUTLASS B" << std::endl;
-  // print_mat(K, N, host_b);
+  std::cout << "CUTLASS B" << std::endl;
+  print_mat(K, N, host_b);
 
   std::cout << "CUTLASS reference" << std::endl;
   print_mat(M, N, host_reference);
@@ -764,6 +764,7 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta) {
       if (host_cutlass[row * ldc + col] != host_reference[row * ldc + col]) {
         std::cerr << "CUTLASS results incorrect: (" << row << ", " << col << "): "
           << host_cutlass[row * ldc + col] << " != " << host_reference[row * ldc + col] << std::endl;
+          return cudaErrorUnknown;
       }
     }
   }
@@ -799,7 +800,7 @@ int main(int argc, const char *arg[]) {
   }
 
   // Scalars used for linear scaling the result of the matrix product.
-  A_type scalars[2] = { cutlass::half_t::convert(1.f), cutlass::half_t::convert(0.f) }; //todo scalars assumed to have same type
+  A_type scalars[2] = {  static_cast<A_type>(1.f), static_cast<A_type>(0.f) }; //todo scalars assumed to have same type
 
   // for (int i = 4; i < argc && i < 6; ++i) {
   //   std::stringstream ss(arg[i]);
