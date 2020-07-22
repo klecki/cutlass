@@ -66,6 +66,8 @@
 // Defines cutlass::gemm::device::Gemm, the generic Gemm computation template class.
 #include "cutlass/gemm/device/gemm.h"
 
+#include "cutlass/half.h"
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 //
 // This function defines a CUTLASS GEMM kernel instantiation, constructs its parameters object,
@@ -76,8 +78,8 @@
 
 static constexpr int kWindowSize = 17;
 
-using A_type = float;
-using B_type = float;
+using A_type = cutlass::half_t;
+using B_type = cutlass::half_t;
 using C_type = float;
 
 /// Define a CUTLASS GEMM template and launch a GEMM kernel.
@@ -113,11 +115,41 @@ cudaError_t CutlassSgemmNN(
   //                                                 C_type,        // Data-type of C matrix
   //                                                 ColumnMajor>; // Layout of C matrix
 
+
+  // This code section describes whether you want to use tensor cores or regular SIMT cores on GPU SM
+  using MMAOp = cutlass::arch::OpClassTensorOp;
+
+  // This code section describes CUDA SM architecture number
+  using SmArch = cutlass::arch::Sm70;
+
+  // // This code section describes the tile size a thread block will compute
+  // using ShapeMMAThreadBlock =
+  //     cutlass::gemm::GemmShape<128, 128, 32>;  // <- threadblock tile M = 128, N = 128, K = 32
+  // // This code section describes tile size a warp will compute
+  // using ShapeMMAWarp = cutlass::gemm::GemmShape<64, 64, 32>;  // <- warp tile M = 64, N = 64, K = 32
+  // // This code section describes the size of MMA op
+  // using ShapeMMAOp = cutlass::gemm::GemmShape<8, 8, 4>;  // <- MMA Op tile M = 8, N = 8, K = 4
+
+  // using CutlassConv = cutlass::gemm::device::Conv<A_type,        // Data-type of A matrix
+  //                                                 RowMajor,  // Layout of A matrix
+  //                                                 B_type,        // Data-type of B matrix
+  //                                                 C_type,        // Data-type of C matrix
+  //                                                 RowMajor, 2, false>; // Layout of C matrix
+
+
   using CutlassConv = cutlass::gemm::device::Conv<A_type,        // Data-type of A matrix
                                                   RowMajor,  // Layout of A matrix
                                                   B_type,        // Data-type of B matrix
                                                   C_type,        // Data-type of C matrix
-                                                  RowMajor, 2, false>; // Layout of C matrix
+                                                  RowMajor,    // Layout of C matrix
+                                                  2, false, // axes, InnerConv
+                                                  C_type,  // element acumulator
+                                                  MMAOp, // tensor op
+                                                  SmArch//, // arch 70
+                                                  // ShapeMMAThreadBlock, // we can probably leave default shapes, but we need gemm 8x8x4
+                                                  // ShapeMMAWarp,
+                                                  // ShapeMMAOp
+                                                  >;
 
   // Define a CUTLASS GEMM type
   CutlassConv gemm_operator;
@@ -137,7 +169,7 @@ cudaError_t CutlassSgemmNN(
   size[0] = M;
   size[1] = N;
   cutlass::Array<int, 2> window_sizes;
-  cutlass::Array<float *, 2> windows;
+  cutlass::Array<B_type *, 2> windows;
   for (int i = 0; i < 2; i++) {
     window_sizes[i] = window_size;
     windows[i] = const_cast<B_type*>(window); // TODO(klecki): passing non-const value, cause CUTLASS is using non-const refs due to RW iterators (even when only reading)
@@ -197,9 +229,9 @@ __global__ void InitializeMatrix_kernel(
     // T value = T(((offset + seed) * k % m) - m / 2); // TODO modulo something
     // T value = row * 100 + col;
 
-    T value = 0;
+    T value = cutlass::half_t::convert(0.f);
     if (row == col)
-      value = 1;
+      value = cutlass::half_t::convert(1.f);
 
     matrix[offset] = value;
 
@@ -225,15 +257,15 @@ __global__ void InitializeMatrix_kernel_col_invariant(
     // int const m = 16;
     // T value = T(((col + seed) * k % m) - m / 2); // TODO modulo something
     int diag_dist = row - col;
-    T value = 0;
-    int window_size = kWindowSize;
-    int radius = window_size / 2;
-    if (diag_dist == 0) {
-      value = 100;
-    }
-    else if (::abs(diag_dist) <= radius) {
-      value = radius - abs(diag_dist);
-    }
+    T value = cutlass::half_t::convert(0.f);
+    // int window_size = kWindowSize;
+    // int radius = window_size / 2;
+    // if (diag_dist == 0) {
+    //   value = 100;
+    // }
+    // else if (::abs(diag_dist) <= radius) {
+    //   value = radius - abs(diag_dist);
+    // }
 
     // initialize with the col-repeat scheme
     // T value = col;
@@ -365,7 +397,7 @@ __global__ void ReferenceGemm_kernel(
     C_type accumulator = 0;
 
     for (int k = 0; k < K; ++k) {
-      accumulator += A[i * lda + k] * B[k * ldb + j];
+      accumulator += (float)A[i * lda + k] * (float)B[k * ldb + j];
     }
 
     C[i * ldc + j] = alpha * accumulator + beta * C[i * ldc + j];
@@ -447,7 +479,7 @@ __global__ void ReferenceConv_kernel_inner(
     C_type accumulator = 0;
 
     for (int k = -radius; k <= radius; ++k) {
-      accumulator += A[row * lda + idx_reflect_101(col + k, N)] * window[k];
+      accumulator += (float)A[row * lda + idx_reflect_101(col + k, N)] * (float)window[k];
     }
 
     C[row * ldc + col] = alpha * accumulator + beta * C[row * ldc + col];
@@ -475,7 +507,7 @@ __global__ void ReferenceConv_kernel_outer(
     C_type accumulator = 0;
 
     for (int k = -radius; k <= radius; ++k) {
-      accumulator += A[idx_reflect_101(row + k, M) * lda + col] * window[k];
+      accumulator += (float)A[idx_reflect_101(row + k, M) * lda + col] * (float)window[k];
     }
 
     C[row * ldc + col] = alpha * accumulator + beta * C[row * ldc + col];
@@ -522,7 +554,7 @@ void print_mat(int rows, int cols, const std::vector<T> &mat, int max_rows = -1,
   for (int r = 0; r < max_rows; r++) {
     std::cout << "{";
     for (int c = 0; c < max_cols; c++) {
-      std::cout << mat[r * cols + c] << ", ";
+      std::cout << (float)mat[r * cols + c] << ", ";
     }
     std::cout << "}\n";
   }
@@ -567,17 +599,17 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta) {
   B_type *window;
   int max_window = 1024;
   result = cudaMalloc(reinterpret_cast<void **>(&window), sizeof(B_type) * max_window);
-  std::vector<B_type> window_host(max_window, 0);
+  std::vector<B_type> window_host(max_window);
   for (int i = 0; i < radius; i++) {
-    window_host[i] = i;
-    window_host[window_size - 1 - i] = i;
+    window_host[i] = cutlass::half_t::convert(i);
+    window_host[window_size - 1 - i] = cutlass::half_t::convert(i);
   }
-  window_host[radius] = 100;
+  window_host[radius] = cutlass::half_t::convert(100);
   // for (int i = 0; i < window_size; i++) {
   //   printf("Window[%d] = %f\n", i, window_host[i]);
   // }
   for (int i = window_size; i < max_window; i++) {
-    window_host[i] = -42.f;
+    window_host[i] = cutlass::half_t::convert(-42.f);
   }
 
   result = cudaMemcpy(window, window_host.data(), sizeof(B_type) * max_window, cudaMemcpyHostToDevice);
@@ -666,10 +698,10 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta) {
   }
 
   // Copy to host and verify equivalence.
-  std::vector<A_type> host_a(lda * M, 0);
-  std::vector<B_type> host_b(ldb * K, 0);
-  std::vector<C_type> host_cutlass(ldc * M, 0);
-  std::vector<C_type> host_reference(ldc * M, 0);
+  std::vector<A_type> host_a(lda * M);
+  std::vector<B_type> host_b(ldb * K);
+  std::vector<C_type> host_cutlass(ldc * M);
+  std::vector<C_type> host_reference(ldc * M);
 
   result = cudaMemcpy(host_a.data(), A, sizeof_A, cudaMemcpyDeviceToHost);
   result = cudaMemcpy(host_b.data(), B, sizeof_B, cudaMemcpyDeviceToHost);
@@ -766,12 +798,12 @@ int main(int argc, const char *arg[]) {
   }
 
   // Scalars used for linear scaling the result of the matrix product.
-  A_type scalars[2] = { 1, 0 }; //todo scalars assumed to have same type
+  A_type scalars[2] = { cutlass::half_t::convert(1.f), cutlass::half_t::convert(0.f) }; //todo scalars assumed to have same type
 
-  for (int i = 4; i < argc && i < 6; ++i) {
-    std::stringstream ss(arg[i]);
-    ss >> scalars[i - 4];
-  }
+  // for (int i = 4; i < argc && i < 6; ++i) {
+  //   std::stringstream ss(arg[i]);
+  //   ss >> scalars[i - 4];
+  // }
 
   //
   // Run the CUTLASS GEMM test.

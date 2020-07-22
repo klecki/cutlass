@@ -198,46 +198,46 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 
 // ////////////////////////////////////////////////////////////////////////////////
 
-// /// Specialization for row-major output (OperatorClass TensorOp)
-// template <
-//     /// Element type for A matrix operand
-//     typename ElementA,
-//     /// Layout type for A matrix operand
-//     typename LayoutA,
-//     /// Access granularity of A matrix in units of elements
-//     int kAlignmentA,
-//     /// Element type for B matrix operand
-//     typename ElementB,
-//     /// Layout type for B matrix operand
-//     typename LayoutB,
-//     /// Access granularity of B matrix in units of elements
-//     int kAlignmentB,
-//     /// Element type for internal accumulation
-//     typename ElementAccumulator,
-//     /// Tag indicating architecture to tune for
-//     typename ArchTag,
-//     /// Threadblock-level tile size (concept: GemmShape)
-//     typename ThreadblockShape,
-//     /// Warp-level tile size (concept: GemmShape)
-//     typename WarpShape,
-//     /// Instruction-level tile size (concept: GemmShape)
-//     typename InstructionShape,
-//     /// Operation performed by GEMM
-//     typename Operator,
-//     /// Type of Convolution
-//     bool InnerConv
-//     >
-// struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
-//                   kAlignmentB, ElementAccumulator, layout::RowMajor,
-//                   arch::OpClassTensorOp, ArchTag, ThreadblockShape, WarpShape,
-//                   InstructionShape, 2, Operator, false> {
-//   // Define the MmaCore components
-//   using MmaCore = typename cutlass::gemm::threadblock::DefaultMmaCore<
-//       ThreadblockShape, WarpShape, InstructionShape, ElementA, LayoutA,
-//       ElementB, LayoutB, ElementAccumulator, layout::RowMajor,
-//       arch::OpClassTensorOp, 2, Operator>;
+/// Specialization for row-major output (OperatorClass TensorOp)
+template <
+    /// Element type for A matrix operand
+    typename ElementA,
+    /// Layout type for A matrix operand
+    typename LayoutA,
+    /// Access granularity of A matrix in units of elements
+    int kAlignmentA,
+    /// Element type for B matrix operand
+    typename ElementB,
+    /// Layout type for B matrix operand
+    typename LayoutB,
+    /// Access granularity of B matrix in units of elements
+    int kAlignmentB,
+    /// Element type for internal accumulation
+    typename ElementAccumulator,
+    /// Tag indicating architecture to tune for
+    typename ArchTag,
+    /// Threadblock-level tile size (concept: GemmShape)
+    typename ThreadblockShape,
+    /// Warp-level tile size (concept: GemmShape)
+    typename WarpShape,
+    /// Instruction-level tile size (concept: GemmShape)
+    typename InstructionShape,
+    /// Operation performed by GEMM
+    typename Operator,
+    /// Type of Convolution
+    bool InnerConv
+    >
+struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
+                  kAlignmentB, ElementAccumulator, layout::RowMajor,
+                  arch::OpClassTensorOp, ArchTag, ThreadblockShape, WarpShape,
+                  InstructionShape, 2, Operator, false, InnerConv> {
+  // Define the MmaCore components
+  using MmaCore = typename cutlass::gemm::threadblock::DefaultMmaCore<
+      ThreadblockShape, WarpShape, InstructionShape, ElementA, LayoutA,
+      ElementB, LayoutB, ElementAccumulator, layout::RowMajor,
+      arch::OpClassTensorOp, 2, Operator>;
 
-//   // Define iterators over tiles from the A operand
+  // Define iterators over tiles from the A operand
 //   using IteratorA =
 //       cutlass::transform::threadblock::PredicatedTileIterator<
 //           cutlass::MatrixShape<MmaCore::Shape::kM, MmaCore::Shape::kK>,
@@ -249,46 +249,79 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 //           cutlass::MatrixShape<MmaCore::Shape::kK, MmaCore::Shape::kN>,
 //           ElementB, LayoutB, 0, typename MmaCore::IteratorThreadMapB, kAlignmentB>;
 
-//   // Define the threadblock-scoped pipelined matrix multiply
-//   using ThreadblockMma = cutlass::gemm::threadblock::ConvMmaPipelined<
-//       typename MmaCore::Shape, IteratorA, typename MmaCore::SmemIteratorA,
-//       IteratorB, typename MmaCore::SmemIteratorB, ElementAccumulator,
-//       layout::RowMajor, typename MmaCore::MmaPolicy>;
-// };
 
-// ////////////////////////////////////////////////////////////////////////////////
-// /// Specialization for row-major output (OperatorClass TensorOp)
-// template <
-//     /// Layout type for A matrix operand
-//     typename LayoutA,
-//     /// Access granularity of A matrix in units of elements
-//     int kAlignmentA,
-//     /// Layout type for B matrix operand
-//     typename LayoutB,
-//     /// Access granularity of B matrix in units of elements
-//     int kAlignmentB,
-//     /// Tag indicating architecture to tune for
-//     typename ArchTag,
-//     /// Threadblock-level tile size (concept: GemmShape)
-//     typename ThreadblockShape,
-//     /// Warp-level tile size (concept: GemmShape)
-//     typename WarpShape,
-//     /// Instruction-level tile size (concept: GemmShape)
-//     typename InstructionShape,
-//     /// Operation performed by GEMM
-//     typename Operator,
-//     /// Type of Convolution
-//     bool InnerConv
-//     >
-// struct DefaultConvMma<float, LayoutA, kAlignmentA, float, LayoutB,
-//                   kAlignmentB, float, layout::RowMajor,
-//                   arch::OpClassTensorOp, ArchTag, ThreadblockShape, WarpShape,
-//                   InstructionShape, 2, Operator, false> {
-//   // Define the MmaCore components
-//   using MmaCore = typename cutlass::gemm::threadblock::DefaultMmaCore<
-//       ThreadblockShape, WarpShape, InstructionShape, float, LayoutA, float,
-//       LayoutB, float, layout::RowMajor, arch::OpClassTensorOp, 2,
-//       arch::OpMultiplyAddFastF16>;
+
+  static int const kInnerConv = InnerConv;
+
+  // Define iterators over tiles from the A operand
+  using IteratorA_regular_gmem_ =
+      cutlass::transform::threadblock::PredicatedTileIterator<
+          cutlass::MatrixShape<MmaCore::Shape::kM, MmaCore::Shape::kK>,
+          ElementA, LayoutA, 1, typename MmaCore::IteratorThreadMapA, kAlignmentA>;
+
+  using IteratorA_outer_conv_smem_ =
+      cutlass::transform::threadblock::PositionPredicatedTileIterator<
+          cutlass::MatrixShape<MmaCore::Shape::kM, MmaCore::Shape::kK>,
+          ElementA, LayoutA, 1, typename MmaCore::IteratorThreadMapA, kAlignmentB>;
+
+  // Define iterators over tiles from the B operand
+  using IteratorA = std::conditional_t<kInnerConv, IteratorA_regular_gmem_, IteratorA_outer_conv_smem_>;
+
+
+  // Define iterators over tiles from the B operand
+  using IteratorB_inner_conv_smem_ =
+      cutlass::transform::threadblock::PositionPredicatedTileIterator<
+          cutlass::MatrixShape<MmaCore::Shape::kK, MmaCore::Shape::kN>,
+          ElementB, LayoutB, 0, typename MmaCore::IteratorThreadMapB, kAlignmentB>;
+
+  using IteratorB_regular_gmem_ = cutlass::transform::threadblock::PredicatedTileIterator<
+          cutlass::MatrixShape<MmaCore::Shape::kK, MmaCore::Shape::kN>,
+          ElementB, LayoutB, 0, typename MmaCore::IteratorThreadMapB, kAlignmentB>;
+
+  // Define iterators over tiles from the B operand
+  using IteratorB = std::conditional_t<kInnerConv, IteratorB_inner_conv_smem_, IteratorB_regular_gmem_>;
+
+
+  // Define the threadblock-scoped pipelined matrix multiply
+  using ThreadblockMma = cutlass::gemm::threadblock::ConvMmaPipelined<
+      typename MmaCore::Shape, IteratorA, typename MmaCore::SmemIteratorA,
+      IteratorB, typename MmaCore::SmemIteratorB, ElementAccumulator,
+      layout::RowMajor, typename MmaCore::MmaPolicy, InnerConv>;
+};
+
+////////////////////////////////////////////////////////////////////////////////
+/// Specialization for row-major output (OperatorClass TensorOp)
+template <
+    /// Layout type for A matrix operand
+    typename LayoutA,
+    /// Access granularity of A matrix in units of elements
+    int kAlignmentA,
+    /// Layout type for B matrix operand
+    typename LayoutB,
+    /// Access granularity of B matrix in units of elements
+    int kAlignmentB,
+    /// Tag indicating architecture to tune for
+    typename ArchTag,
+    /// Threadblock-level tile size (concept: GemmShape)
+    typename ThreadblockShape,
+    /// Warp-level tile size (concept: GemmShape)
+    typename WarpShape,
+    /// Instruction-level tile size (concept: GemmShape)
+    typename InstructionShape,
+    /// Operation performed by GEMM
+    typename Operator,
+    /// Type of Convolution
+    bool InnerConv
+    >
+struct DefaultConvMma<float, LayoutA, kAlignmentA, float, LayoutB,
+                  kAlignmentB, float, layout::RowMajor,
+                  arch::OpClassTensorOp, ArchTag, ThreadblockShape, WarpShape,
+                  InstructionShape, 2, Operator, false, InnerConv> {
+  // Define the MmaCore components
+  using MmaCore = typename cutlass::gemm::threadblock::DefaultMmaCore<
+      ThreadblockShape, WarpShape, InstructionShape, float, LayoutA, float,
+      LayoutB, float, layout::RowMajor, arch::OpClassTensorOp, 2,
+      arch::OpMultiplyAddFastF16>;
 
 //   // Define iterators over tiles from the A operand
 //   using IteratorA =
@@ -302,12 +335,46 @@ struct DefaultConvMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB,
 //           cutlass::MatrixShape<MmaCore::Shape::kK, MmaCore::Shape::kN>,
 //           float, LayoutB, 0, typename MmaCore::IteratorThreadMapB, kAlignmentB>;
 
-//   // Define the threadblock-scoped pipelined matrix multiply
-//   using ThreadblockMma = cutlass::gemm::threadblock::ConvMmaPipelined<
-//       typename MmaCore::Shape, IteratorA, typename MmaCore::SmemIteratorA,
-//       IteratorB, typename MmaCore::SmemIteratorB, float,
-//       layout::RowMajor, typename MmaCore::MmaPolicy>;
-// };
+
+
+
+  static int const kInnerConv = InnerConv;
+
+  // Define iterators over tiles from the A operand
+  using IteratorA_regular_gmem_ =
+      cutlass::transform::threadblock::PredicatedTileIterator<
+          cutlass::MatrixShape<MmaCore::Shape::kM, MmaCore::Shape::kK>,
+          float, LayoutA, 1, typename MmaCore::IteratorThreadMapA, kAlignmentA>;
+
+  using IteratorA_outer_conv_smem_ =
+      cutlass::transform::threadblock::PositionPredicatedTileIterator<
+          cutlass::MatrixShape<MmaCore::Shape::kM, MmaCore::Shape::kK>,
+          float, LayoutA, 1, typename MmaCore::IteratorThreadMapA, kAlignmentB>;
+
+  // Define iterators over tiles from the B operand
+  using IteratorA = std::conditional_t<kInnerConv, IteratorA_regular_gmem_, IteratorA_outer_conv_smem_>;
+
+
+  // Define iterators over tiles from the B operand
+  using IteratorB_inner_conv_smem_ =
+      cutlass::transform::threadblock::PositionPredicatedTileIterator<
+          cutlass::MatrixShape<MmaCore::Shape::kK, MmaCore::Shape::kN>,
+          float, LayoutB, 0, typename MmaCore::IteratorThreadMapB, kAlignmentB>;
+
+  using IteratorB_regular_gmem_ = cutlass::transform::threadblock::PredicatedTileIterator<
+          cutlass::MatrixShape<MmaCore::Shape::kK, MmaCore::Shape::kN>,
+          float, LayoutB, 0, typename MmaCore::IteratorThreadMapB, kAlignmentB>;
+
+  // Define iterators over tiles from the B operand
+  using IteratorB = std::conditional_t<kInnerConv, IteratorB_inner_conv_smem_, IteratorB_regular_gmem_>;
+
+
+  // Define the threadblock-scoped pipelined matrix multiply
+  using ThreadblockMma = cutlass::gemm::threadblock::ConvMmaPipelined<
+      typename MmaCore::Shape, IteratorA, typename MmaCore::SmemIteratorA,
+      IteratorB, typename MmaCore::SmemIteratorB, float,
+      layout::RowMajor, typename MmaCore::MmaPolicy, InnerConv>;
+};
 
 // ////////////////////////////////////////////////////////////////////////////////
 

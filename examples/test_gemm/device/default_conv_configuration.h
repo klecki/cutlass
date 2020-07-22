@@ -149,36 +149,36 @@ struct DefaultConvConfiguration<
 
 // ////////////////////////////////////////////////////////////////////////////////
 
-// template <
-//   typename ElementA,
-//   typename ElementB,
-//   typename ElementC,
-//   typename ElementAccumulator>
-// struct DefaultConvConfiguration<
-//   arch::OpClassTensorOp,
-//   arch::Sm70,
-//   ElementA,
-//   ElementB,
-//   ElementC,
-//   ElementAccumulator> {
+template <
+  typename ElementA,
+  typename ElementB,
+  typename ElementC,
+  typename ElementAccumulator>
+struct DefaultConvConfiguration<
+  arch::OpClassTensorOp,
+  arch::Sm70,
+  ElementA,
+  ElementB,
+  ElementC,
+  ElementAccumulator> {
 
-//   static int const kAlignmentA = 128 / sizeof_bits<ElementA>::value;
-//   static int const kAlignmentB = 128 / sizeof_bits<ElementB>::value;
+  static int const kAlignmentA = 128 / sizeof_bits<ElementA>::value;
+  static int const kAlignmentB = 128 / sizeof_bits<ElementB>::value;
 
-//   using ThreadblockShape = GemmShape<128, 256, 32>;
-//   using WarpShape = GemmShape<64, 64, 32>;
-//   using InstructionShape = GemmShape<16, 16, 4>;
-//   static int const kStages = 2;
+  using ThreadblockShape = GemmShape<128, 256, 32>;
+  using WarpShape = GemmShape<64, 64, 32>;
+  using InstructionShape = GemmShape<16, 16, 4>;
+  static int const kStages = 2;
 
-//   using EpilogueOutputOp = epilogue::thread::LinearCombination<
-//     ElementC,
-//     128 / sizeof_bits<ElementC>::value,
-//     ElementAccumulator,
-//     ElementAccumulator
-//   >;
+  using EpilogueOutputOp = epilogue::thread::LinearCombination<
+    ElementC,
+    128 / sizeof_bits<ElementC>::value,
+    ElementAccumulator,
+    ElementAccumulator
+  >;
 
-//   using Operator = arch::OpMultiplyAdd;
-// };
+  using Operator = arch::OpMultiplyAdd;
+};
 
 // ////////////////////////////////////////////////////////////////////////////////
 
