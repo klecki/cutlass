@@ -166,7 +166,7 @@ struct DefaultConv<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB, kAlignment
                    EpilogueOutputOp, ThreadblockSwizzle, Stages, SplitKSerial,
                    Operator> {
   /// Define the threadblock-scoped matrix multiply-accumulate
-  using Mma = typename cutlass::gemm::threadblock::DefaultConvMma<
+  using Mma = typename cutlass::gemm::threadblock::SpecializedConvMma<
       ElementA, LayoutA, kAlignmentA, ElementB, LayoutB, kAlignmentB,
       ElementAccumulator, layout::RowMajor, arch::OpClassTensorOp, arch::Sm80,
       ThreadblockShape, WarpShape, InstructionShape, Stages,
@@ -236,7 +236,7 @@ struct DefaultConv<
 > {
 
   /// Define the threadblock-scoped matrix multiply-accumulate
-  using Mma = typename cutlass::gemm::threadblock::DefaultConvMma<
+  using Mma = typename cutlass::gemm::threadblock::SpecializedConvMma<
     ElementA,
     LayoutA,
     kAlignmentA,
@@ -318,7 +318,7 @@ struct DefaultConv<
   using ElementAccumulator = int32_t;
 
   /// Define the threadblock-scoped matrix multiply-accumulate
-  using Mma = typename cutlass::gemm::threadblock::DefaultConvMma<
+  using Mma = typename cutlass::gemm::threadblock::SpecializedConvMma<
       ElementA, LayoutA, kAlignmentA, ElementB, LayoutB, kAlignmentB,
       ElementAccumulator, LayoutC, arch::OpClassTensorOp, arch::Sm80,
       ThreadblockShape, WarpShape, InstructionShape, Stages, Operator,
@@ -384,7 +384,7 @@ struct DefaultConv<ElementA, layout::ColumnMajorInterleaved<InterleavedK>,
   using ElementAccumulator = int32_t;
 
   /// Define the threadblock-scoped matrix multiply-accumulate
-  using Mma = typename cutlass::gemm::threadblock::DefaultConvMma<
+  using Mma = typename cutlass::gemm::threadblock::SpecializedConvMma<
       ElementA, LayoutA, kAlignmentA, ElementB, LayoutB, kAlignmentB, ElementAccumulator, LayoutC,
       arch::OpClassTensorOp, arch::Sm75, ThreadblockShape, WarpShape,
       InstructionShape, 2, Operator, true>::ThreadblockMma;
@@ -460,7 +460,7 @@ struct DefaultConv<
   > {
 
   /// Define the threadblock-scoped matrix multiply-accumulate
-  using Mma = typename cutlass::gemm::threadblock::DefaultConvMma<
+  using Mma = typename cutlass::gemm::threadblock::SpecializedConvMma<
     ElementA,
     LayoutA,
     kAlignmentA,
@@ -556,7 +556,7 @@ struct DefaultConv<
     IsBetaZero,
     InnerConv> {
   /// Define the threadblock-scoped matrix multiply-accumulate
-  using Mma = typename cutlass::gemm::threadblock::DefaultConvMma<
+  using Mma = typename cutlass::gemm::threadblock::SpecializedConvMma<
       ElementA,
       LayoutA,
       kAlignmentA,
@@ -645,7 +645,7 @@ struct DefaultConv<ElementA,
                    Operator> {
 
   /// Define the threadblock-scoped matrix multiply-accumulate
-  using Mma = typename cutlass::gemm::threadblock::DefaultConvMma<
+  using Mma = typename cutlass::gemm::threadblock::SpecializedConvMma<
       ElementA, LayoutA, kAlignmentA, ElementB, LayoutB, kAlignmentB,
       ElementAccumulator, layout::RowMajor, arch::OpClassSimt, arch::Sm80,
       ThreadblockShape, WarpShape, GemmShape<1, 1, 1>, Stages,
@@ -710,7 +710,7 @@ struct DefaultConv<int8_t, LayoutA, kAlignmentA, int8_t, LayoutB, kAlignmentB,
 
   using OperatorClass =  arch::OpClassSimt;
   /// Define the threadblock-scoped matrix multiply-accumulate
-  using Mma = typename cutlass::gemm::threadblock::DefaultConvMma<ElementA,
+  using Mma = typename cutlass::gemm::threadblock::SpecializedConvMma<ElementA,
       LayoutA,
       kAlignmentA,
       ElementB,
@@ -798,7 +798,7 @@ struct DefaultConv<
   SplitKSerial,
   Operator> {
   /// Define the threadblock-scoped matrix multiply-accumulate
-  using Mma = typename cutlass::gemm::threadblock::DefaultConvMma<
+  using Mma = typename cutlass::gemm::threadblock::SpecializedConvMma<
       ElementA, LayoutA, kAlignmentA,
       ElementB, LayoutB, kAlignmentB,
       ElementAccumulator, LayoutC,

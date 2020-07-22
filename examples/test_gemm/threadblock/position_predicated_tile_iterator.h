@@ -183,7 +183,7 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
 
   /// Type used for internal memory accesses
   using AccessType = AlignedArray<Element, AccessSize, (AccessSize * sizeof_bits<Element>::value / 8)>;
-  // static_assert(AccessSize == 1, "I can't access more than one element as I don't know how the coords work in that case");
+  static_assert(AccessSize == 1, "I can't access more than one element as I don't know how the coords work in that case");
 
   /// Underlying iterator to compute the addresses
   using TileAccessIterator =
