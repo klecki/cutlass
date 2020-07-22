@@ -123,12 +123,13 @@ cudaError_t CutlassSgemmNN(
   using SmArch = cutlass::arch::Sm70;
 
   // // This code section describes the tile size a thread block will compute
-  // using ShapeMMAThreadBlock =
-  //     cutlass::gemm::GemmShape<128, 128, 32>;  // <- threadblock tile M = 128, N = 128, K = 32
+  using ShapeMMAThreadBlock =
+      cutlass::gemm::GemmShape<128, 128, 32>;  // <- threadblock tile M = 128, N = 128, K = 32
   // // This code section describes tile size a warp will compute
-  // using ShapeMMAWarp = cutlass::gemm::GemmShape<64, 64, 32>;  // <- warp tile M = 64, N = 64, K = 32
+  using ShapeMMAWarp = cutlass::gemm::GemmShape<64, 64, 32>;  // <- warp tile M = 64, N = 64, K = 32
   // // This code section describes the size of MMA op
-  // using ShapeMMAOp = cutlass::gemm::GemmShape<8, 8, 4>;  // <- MMA Op tile M = 8, N = 8, K = 4
+  // !!!! WE NEED THIS SO IT CAN ACTUALLY RUN ON Tensor Cores, the default is different
+  using ShapeMMAOp = cutlass::gemm::GemmShape<8, 8, 4>;  // <- MMA Op tile M = 8, N = 8, K = 4
 
   // using CutlassConv = cutlass::gemm::device::Conv<A_type,        // Data-type of A matrix
   //                                                 RowMajor,  // Layout of A matrix
@@ -145,10 +146,10 @@ cudaError_t CutlassSgemmNN(
                                                   2, false, // axes, InnerConv
                                                   C_type,  // element acumulator
                                                   MMAOp, // tensor op
-                                                  SmArch//, // arch 70
-                                                  // ShapeMMAThreadBlock, // we can probably leave default shapes, but we need gemm 8x8x4
-                                                  // ShapeMMAWarp,
-                                                  // ShapeMMAOp
+                                                  SmArch, // arch 70
+                                                  ShapeMMAThreadBlock, // we can probably leave default shapes, but we need gemm 8x8x4
+                                                  ShapeMMAWarp,
+                                                  ShapeMMAOp
                                                   >;
 
   // Define a CUTLASS GEMM type
