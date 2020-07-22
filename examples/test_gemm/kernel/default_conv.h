@@ -61,6 +61,9 @@
 #include "cutlass/transform/threadblock/predicated_tile_iterator.h"
 #include "threadblock/position_predicated_tile_iterator.h"
 
+// point to original impl
+#include "cutlass/gemm/kernel/default_gemm.h"
+
 #if defined(CUTLASS_ARCH_WMMA_ENABLED)
 #include "cutlass/epilogue/threadblock/default_epilogue_wmma_tensor_op.h"
 #endif //CUTLASS_ARCH_WMMA_ENABLED
@@ -76,21 +79,21 @@ namespace kernel {
 
 template <
     /// Element type for A matrix operand
-    typename ElementA_,
+    typename ElementA,
     /// Layout type for A matrix operand
-    typename LayoutA_,
+    typename LayoutA,
     /// Access granularity of A matrix in units of elements
     int kAlignmentA,
     /// Element type for B matrix operand
-    typename ElementB_,
+    typename ElementB,
     /// Layout type for B matrix operand
-    typename LayoutB_,
+    typename LayoutB,
     /// Access granularity of B matrix in units of elements
     int kAlignmentB,
     /// Element type for C and D matrix operands
-    typename ElementC_,
+    typename ElementC,
     /// Layout type for C and D matrix operands
-    typename LayoutC_,
+    typename LayoutC,
     /// Element type for internal accumulation
     typename ElementAccumulator,
     /// Operator class tag
@@ -118,12 +121,45 @@ template <
     bool IsBetaZero = false,
     /// If the convolution is computed in the innermost or outer dimension
     bool InnerConv = true>
-struct DefaultConv;
+struct DefaultConv {
+  using UnderlyingConv = DefaultGemm<
+      ElementA, LayoutA, kAlignmentA,
+      ElementB, LayoutB, kAlignmentB,
+      ElementC, layout::RowMajor,
+      ElementAccumulator,
+      OperatorClass,
+      ArchTag,
+      ThreadblockShape,
+      WarpShape,
+      InstructionShape,
+      EpilogueOutputOp,
+      ThreadblockSwizzle,
+      Stages,
+      SplitKSerial,
+      Operator,
+      IsBetaZero>;
+  using Mma = typename cutlass::gemm::threadblock::SpecializedConvMma<
+      ElementA, LayoutA, kAlignmentA, ElementB, LayoutB, kAlignmentB,
+      ElementAccumulator, LayoutC, OperatorClass, ArchTag,
+      ThreadblockShape, WarpShape, InstructionShape, Stages,
+      Operator, IsBetaZero, InnerConv>::ThreadblockMma;
+
+  /// Define the epilogue
+  using Epilogue =typename UnderlyingConv::Epilogue;
+
+  /// Define the kernel-level GEMM operator.
+  using GemmKernel = kernel::Conv<Mma, Epilogue, ThreadblockSwizzle, SplitKSerial>;
+
+};
 
 // we could utilize tensor cores in some scenarios, will get back into it
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
+
+/*
+
+
 
 /// Partial specialization for Ampere Architecture
 template <
@@ -828,6 +864,8 @@ struct DefaultConv<
 #endif //CUTLASS_ARCH_WMMA_ENABLED
 
 // ////////////////////////////////////////////////////////////////////////////////
+*/
+
 
 }  // namespace kernel
 }  // namespace gemm
