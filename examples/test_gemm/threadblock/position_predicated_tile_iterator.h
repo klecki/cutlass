@@ -337,6 +337,7 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
     // TODO(klecki): can we unlock the bigger access patterns?
     // AccessType *frag_ptr = reinterpret_cast<AccessType *>(&frag);
     Pointer frag_ptr = reinterpret_cast<Pointer>(&frag);
+    // AccessType *frag_ptr_orig = reinterpret_cast<AccessType *>(&frag);
 
     CUTLASS_PRAGMA_UNROLL
     for (int s = 0; s < ThreadMap::Iterations::kStrided; ++s) {
@@ -346,7 +347,7 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
         CUTLASS_PRAGMA_UNROLL
         for (int v = 0; v < kAccessesPerVector; ++v) {
 
-          int idx = v + kAccessesPerVector * (c + s * ThreadMap::Iterations::kContiguous);
+          int idx = (v + kAccessesPerVector * (c + s * ThreadMap::Iterations::kContiguous)) * AccessSize;
 
 
           // TODO(klecki): this counts some stuff modulo, that is multiplied above. Can we fuse this?
@@ -391,7 +392,13 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
 
           // pointer_ + radius is center of the window
           const auto *access_element = pointer_ + radius + window_element;
-          frag_ptr[idx] = is_used ? *access_element : Element{};
+          frag_ptr[idx] = is_used ? *access_element : static_cast<Element>(0);
+          // frag_ptr[idx] =  is_used;
+          // Pointer frag_ptr_reg = reinterpret_cast<Pointer>(&frag_ptr_orig[idx]);
+          // for (int i = 0; i < AccessSize; i++) {
+          //   // frag_ptr_reg[i] = i;
+          //   frag_ptr[idx + i] =  + major_coord;
+          // }
 
           // TODO(klecki) this is really a WIP, we need to implement it only for the cases we need it
           // there is no way the window wraps around to us when we're not already covered with original element

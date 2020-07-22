@@ -162,8 +162,12 @@ struct DefaultConvConfiguration<
   ElementC,
   ElementAccumulator> {
 
-  static int const kAlignmentA = 128 / sizeof_bits<ElementA>::value;
-  static int const kAlignmentB = 128 / sizeof_bits<ElementB>::value;
+  // static int const kAlignmentA = 128 / sizeof_bits<ElementA>::value;
+  // static int const kAlignmentB = 128 / sizeof_bits<ElementB>::value;
+  //TODO(klecki): THIS SHOULD HALP FOR MULTIPLE ELEMENTS LOADED
+  // HMMM, need to handle the PPTI more generically
+  static int const kAlignmentA = 1;
+  static int const kAlignmentB = 1;
 
   using ThreadblockShape = GemmShape<128, 256, 32>;
   using WarpShape = GemmShape<64, 64, 32>;
