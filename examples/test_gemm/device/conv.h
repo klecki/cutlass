@@ -538,6 +538,26 @@ public:
 
     cutlass::Kernel<GemmKernelInner><<<grid, block, smem_size, stream>>>(params_inner_);
 
+    #if 1
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    cudaEventRecord(start);
+
+
+    for (int i = 0; i < 100; i++) {
+      cutlass::Kernel<GemmKernelInner><<<grid, block, smem_size, stream>>>(params_inner_);
+    }
+
+    cudaEventRecord(stop);
+    cudaDeviceSynchronize();
+    float totalTime;
+    cudaEventElapsedTime(&totalTime, start, stop);
+    std::cout << "total time " << totalTime / 100.0 << " ms\n";
+
+    #endif
+
     result = cudaGetLastError();
 
     return result == cudaSuccess ? Status::kSuccess : Status::kErrorInternal;

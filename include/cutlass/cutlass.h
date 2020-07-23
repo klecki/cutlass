@@ -147,9 +147,9 @@ struct Debugx  {
   __attribute__((deprecated)) static const int x;
 };
 
-#define PRINT_IF if (threadIdx.x == 0)
+// #define PRINT_IF if (threadIdx.x == 0)
 // #define PRINT_IF if (true)
-// #define PRINT_IF if (false)
+#define PRINT_IF if (false)
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 

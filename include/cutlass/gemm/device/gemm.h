@@ -549,6 +549,26 @@ public:
     // gemm_k_iterations
     // gemm_k_size
 
+    #if 1
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    cudaEventRecord(start);
+
+
+    for (int i = 0; i < 100; i++) {
+      cutlass::Kernel<GemmKernel><<<grid, block, smem_size, stream>>>(params_);
+    }
+
+    cudaEventRecord(stop);
+    cudaDeviceSynchronize();
+    float totalTime;
+    cudaEventElapsedTime(&totalTime, start, stop);
+    std::cout << "total time " << totalTime / 100.0 << " ms\n";
+
+    #endif
+
     cutlass::Kernel<GemmKernel><<<grid, block, smem_size, stream>>>(params_);
 
     result = cudaGetLastError();
