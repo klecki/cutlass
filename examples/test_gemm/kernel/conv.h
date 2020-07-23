@@ -270,6 +270,19 @@ struct Conv {
     return params.params_In;
   }
 
+
+  using ConvolutionIterator = std::conditional_t<kInnerConv, typename Mma::IteratorB, typename Mma::IteratorA>;
+
+  template <bool IsInnerConv>
+  std::enable_if_t<IsInnerConv, ConvolutionIterator&> select_conv_iterator(typename Mma::IteratorA &, typename Mma::IteratorB &iterator) {
+    return iterator;
+  }
+
+  template <bool IsInnerConv>
+  std::enable_if_t<!IsInnerConv, ConvolutionIterator&> select_conv_iterator(typename Mma::IteratorA &iterator, typename Mma::IteratorB &) {
+    return iterator;
+  }
+
   template <bool IsInnerConv>
   CUTLASS_DEVICE
   typename Mma::IteratorA::Pointer select_data_A(void *in_data, void *window_data) {

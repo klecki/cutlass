@@ -107,6 +107,21 @@ public:
   using IteratorIn = std::conditional_t<kInnerConv, IteratorA, IteratorB>;  ///< Input operand in global memory
   using IteratorWindow = std::conditional_t<kInnerConv, IteratorB, IteratorA>;  ///< Window Matrix generated on the fly
 
+  // using ConvolutionIterator = std::conditional_t<kInnerConv, typename Mma::IteratorB, typename Mma::IteratorA>;
+
+  template <bool IsInnerConv>
+  CUTLASS_DEVICE
+  std::enable_if_t<IsInnerConv, IteratorWindow&> select_conv_iterator(IteratorA &, IteratorB &iterator) {
+    return iterator;
+  }
+
+  template <bool IsInnerConv>
+  CUTLASS_DEVICE
+  std::enable_if_t<!IsInnerConv, IteratorWindow&> select_conv_iterator(IteratorA &iterator, IteratorB &) {
+    return iterator;
+  }
+
+
 
   using ElementC = ElementC_;       ///< Data type of accumulator matrix
   using LayoutC = LayoutC_;         ///< Layout of accumulator matrix
@@ -234,6 +249,10 @@ public:
     tb_frag_A.clear();
     tb_frag_B.clear();
 
+    auto &conv_iterator = select_conv_iterator<kInnerConv>(iterator_A, iterator_B);
+    // TODO: need to propagate to wrappers
+    // auto residue_offset = conv_iterator.get_residue_offset();
+
     // The last kblock is loaded in the prolog
     iterator_A.load(tb_frag_A);
     iterator_B.load(tb_frag_B);
@@ -311,8 +330,8 @@ public:
     // Mainloop
     //
 
-    PRINT_IF
-      printf("ConvMmaPipelined::operator() main_loop gemm_k_iterations %d, Base::kWarpGemmIterations: %d\n", gemm_k_iterations, Base::kWarpGemmIterations);
+    // PRINT_IF
+      // printf("ConvMmaPipelined::operator() main_loop gemm_k_iterations %d, Base::kWarpGemmIterations: %d\n", gemm_k_iterations, Base::kWarpGemmIterations);
 
     // Note: The main loop does not support Base::kWarpGemmIterations == 2.
     CUTLASS_GEMM_LOOP
