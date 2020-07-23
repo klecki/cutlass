@@ -75,8 +75,9 @@
 //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+int print = 1;
 
-static constexpr int kWindowSize = 17;
+static constexpr int kWindowSize = 53;
 
 using A_type = cutlass::half_t;
 using B_type = cutlass::half_t;
@@ -257,7 +258,7 @@ __global__ void InitializeMatrix_kernel_col_invariant(
     // int const k = 16807;
     // int const m = 16;
     // T value = T(((col + seed) * k % m) - m / 2); // TODO modulo something
-    int diag_dist = row - col;
+    // int diag_dist = row - col;
     T value =  static_cast<T>(0.f);
     // int window_size = kWindowSize;
     // int radius = window_size / 2;
@@ -746,25 +747,26 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta) {
   //
   // Test for bit equivalence of results.
   //
+  if (print) {
+    // dbg(host_reference);
+    // dbg(host_cutlass);
+    std::cout << "CUTLASS A" << std::endl;
+    print_mat(M, K, host_a);
+    // std::cout << "CUTLASS B" << std::endl;
+    // print_mat(K, N, host_b);
 
-  // dbg(host_reference);
-  // dbg(host_cutlass);
-  std::cout << "CUTLASS A" << std::endl;
-  print_mat(M, K, host_a);
-  // std::cout << "CUTLASS B" << std::endl;
-  // print_mat(K, N, host_b);
+    std::cout << "CUTLASS reference" << std::endl;
+    print_mat(M, N, host_reference);
 
-  std::cout << "CUTLASS reference" << std::endl;
-  print_mat(M, N, host_reference);
-
-  std::cout << "CUTLASS C" << std::endl;
-  print_mat(M, N, host_cutlass, M, N);
-  for (int row = 0; row < M; row++) {
-    for (int col = 0; col < N; col++) {
-      if (host_cutlass[row * ldc + col] != host_reference[row * ldc + col]) {
-        std::cerr << "CUTLASS results incorrect: (" << row << ", " << col << "): "
-          << static_cast<float>(host_cutlass[row * ldc + col]) << " != " << static_cast<float>(host_reference[row * ldc + col]) << std::endl;
-          // return cudaErrorUnknown;
+    std::cout << "CUTLASS C" << std::endl;
+    print_mat(M, N, host_cutlass, M, N);
+    for (int row = 0; row < M; row++) {
+      for (int col = 0; col < N; col++) {
+        if (host_cutlass[row * ldc + col] != host_reference[row * ldc + col]) {
+          std::cerr << "CUTLASS results incorrect: (" << row << ", " << col << "): "
+            << static_cast<float>(host_cutlass[row * ldc + col]) << " != " << static_cast<float>(host_reference[row * ldc + col]) << std::endl;
+            // return cudaErrorUnknown;
+        }
       }
     }
   }
@@ -802,10 +804,10 @@ int main(int argc, const char *arg[]) {
   // Scalars used for linear scaling the result of the matrix product.
   A_type scalars[2] = {  static_cast<A_type>(1.f), static_cast<A_type>(0.f) }; //todo scalars assumed to have same type
 
-  // for (int i = 4; i < argc && i < 6; ++i) {
-  //   std::stringstream ss(arg[i]);
-  //   ss >> scalars[i - 4];
-  // }
+  for (int i = 4; i < argc && i < 5; ++i) {
+    std::stringstream ss(arg[i]);
+    ss >> print;
+  }
 
   //
   // Run the CUTLASS GEMM test.

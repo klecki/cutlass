@@ -322,6 +322,11 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
   CUTLASS_HOST_DEVICE
   void get_mask(Mask &mask) { address_iterator_.get_mask(mask); }
 
+  CUTLASS_HOST_DEVICE
+  TensorCoord get_residue_offset() {
+    return address_iterator_.get_residue_offset();
+  }
+
   CUTLASS_DEVICE
   void load_with_pointer_offset(Fragment &frag, Index pointer_offset) {
     load_with_byte_offset(frag, pointer_offset * sizeof_bits<Element>::value / 8);
@@ -333,9 +338,7 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
       printf("LOAD: kStrided: %d, kContiguous: %d, kAccessesPerVector: %d\n", ThreadMap::Iterations::kStrided, ThreadMap::Iterations::kContiguous, kAccessesPerVector);
 
     // TODO(klecki): can we unlock the bigger access patterns?
-    // AccessType *frag_ptr = reinterpret_cast<AccessType *>(&frag);
-    Pointer frag_ptr = reinterpret_cast<Pointer>(&frag);
-    AccessType *frag_ptr_orig = reinterpret_cast<AccessType *>(&frag);
+    AccessType *frag_ptr = reinterpret_cast<AccessType *>(&frag);
 
     CUTLASS_PRAGMA_UNROLL
     for (int s = 0; s < ThreadMap::Iterations::kStrided; ++s) {
@@ -346,8 +349,6 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
         for (int v = 0; v < kAccessesPerVector; ++v) {
 
           int idx = (v + kAccessesPerVector * (c + s * ThreadMap::Iterations::kContiguous));
-
-
           // This is to mark the iteration number as a compile time constant
           address_iterator_.set_iteration_index(idx);
           // This calculates the logical coordinate of the beggining of access
@@ -374,9 +375,9 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
             major_extent = address_iterator_.get_extent().strided();
           }
 
-
-          // frag_ptr[idx] =  is_used;
-          Pointer frag_ptr_reg = reinterpret_cast<Pointer>(&frag_ptr_orig[idx]);
+          // Pointer frag_ptr_reg = reinterpret_cast<Pointer>(&frag_ptr[idx]);
+          AccessType frag_access_target;
+          // Debug<AccessType>::AccessType t;
           // When we are right operand, there is no way to load data as a vector
           // For left operand, we could try loading consecutive elements, but need to investigate
           // border handling
@@ -400,7 +401,7 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
             // pointer_ + radius is center of the window
             const auto *access_element = pointer_ + radius + window_element;
 
-            frag_ptr_reg[a] = is_used ? *access_element : static_cast<Element>(0);
+            Element calculated_element = is_used ? *access_element : static_cast<Element>(0);
 
 
             // TODO(klecki) this is really a WIP, we need to implement it only for the cases we need it
@@ -415,14 +416,15 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
                 neg_element += 2 * dist_up;
                 if (-neg_element <= radius) {
                   if (dist_up != 0)
-                    frag_ptr_reg[a] += *(pointer_ + radius + neg_element);
+                    calculated_element += *(pointer_ + radius + neg_element);
+                    // frag_access_target[a] += *(pointer_ + radius + neg_element);
                 } else {
                   break;
                 }
                 neg_element -= 2 * dist_down;
                 if (-neg_element <= radius) {
                   if (dist_down != 0)
-                    frag_ptr_reg[a] += *(pointer_ + radius + neg_element);
+                    calculated_element += *(pointer_ + radius + neg_element);
                 } else {
                   break;
                 }
@@ -433,14 +435,14 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
                 pos_element += 2 * dist_down;
                 if (pos_element <= radius) {
                   if (dist_down != 0)
-                    frag_ptr_reg[a] += *(pointer_ + radius + pos_element);
+                    calculated_element += *(pointer_ + radius + pos_element);
                 } else {
                   break;
                 }
                 pos_element -= 2 * dist_up;
                 if (pos_element <= radius) {
                   if (dist_up != 0)
-                  frag_ptr_reg[a] += *(pointer_ + radius + pos_element);
+                    calculated_element += *(pointer_ + radius + pos_element);
                 } else {
                   break;
                 }
@@ -451,7 +453,9 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
             } else {
               major_coord++;
             }
+            frag_access_target[a] = calculated_element;
           }
+          frag_ptr[idx] = frag_access_target;
 
           ++address_iterator_;
         }

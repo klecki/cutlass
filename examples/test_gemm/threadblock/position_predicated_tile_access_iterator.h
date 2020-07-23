@@ -412,6 +412,11 @@ class PositionPredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear
     return get_current_coord_(iteration_contiguous_, iteration_strided_, iteration_vector_);
   }
 
+  CUTLASS_HOST_DEVICE
+  TensorCoord get_residue_offset() {
+    return residue_offset_;
+  }
+
   /// Returns a pointer
   // CUTLASS_HOST_DEVICE
   // AccessType *get() const {
