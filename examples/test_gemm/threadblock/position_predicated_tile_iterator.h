@@ -183,7 +183,7 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
 
   /// Type used for internal memory accesses
   using AccessType = AlignedArray<Element, AccessSize, (AccessSize * sizeof_bits<Element>::value / 8)>;
-  static_assert(AccessSize == 1, "I can't access more than one element as I don't know how the coords work in that case");
+  // static_assert(AccessSize == 1, "I can't access more than one element as I don't know how the coords work in that case");
 
   /// Underlying iterator to compute the addresses
   using TileAccessIterator =
@@ -335,7 +335,7 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
     // TODO(klecki): can we unlock the bigger access patterns?
     // AccessType *frag_ptr = reinterpret_cast<AccessType *>(&frag);
     Pointer frag_ptr = reinterpret_cast<Pointer>(&frag);
-    // AccessType *frag_ptr_orig = reinterpret_cast<AccessType *>(&frag);
+    AccessType *frag_ptr_orig = reinterpret_cast<AccessType *>(&frag);
 
     CUTLASS_PRAGMA_UNROLL
     for (int s = 0; s < ThreadMap::Iterations::kStrided; ++s) {
@@ -345,12 +345,12 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
         CUTLASS_PRAGMA_UNROLL
         for (int v = 0; v < kAccessesPerVector; ++v) {
 
-          int idx = (v + kAccessesPerVector * (c + s * ThreadMap::Iterations::kContiguous)) * AccessSize;
+          int idx = (v + kAccessesPerVector * (c + s * ThreadMap::Iterations::kContiguous));
 
 
-          // TODO(klecki): this counts some stuff modulo, that is multiplied above. Can we fuse this?
+          // This is to mark the iteration number as a compile time constant
           address_iterator_.set_iteration_index(idx);
-          // (klecki): yay, it works :D
+          // This calculates the logical coordinate of the beggining of access
           TensorCoord current_coord = address_iterator_.get_current_coord();
           // if (address_iterator_.valid())
           //   printf(">>[%d, %d, %d] LOADING COORD: (%d, %d), %d\n", threadIdx.x, threadIdx.y, threadIdx.z, current_coord.contiguous(), current_coord.strided(), (int)address_iterator_.valid());
@@ -373,74 +373,86 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
             minor_coord = current_coord.strided(); // row
             major_extent = address_iterator_.get_extent().strided();
           }
-          // for lhs operand, the problem is transposed and the channel computation can be skipped
 
 
-          // distance from diagonal in major coordinate direction
-          int diag_dist = major_coord - minor_coord; // distance from diagonal - coordinate (x, x), negative are above
-
-          // TODO(klecki) do a switch over channels, so we divide by constant almost everytime
-          // TODO(klecki): pack as function:
-          int window_element = kInnerConv ? diag_dist / channels_ : diag_dist;
-          int radius = window_size_ / 2;
-          // element is used if it's our channel (we're multiple of `channels_` from diagonal)
-          // and we still fit in the window
-          bool is_used = (::abs(window_element) <= radius) &&
-              (kInnerConv ? (window_element * channels_ == diag_dist) : true);
-
-          // pointer_ + radius is center of the window
-          const auto *access_element = pointer_ + radius + window_element;
-          frag_ptr[idx] = is_used ? *access_element : static_cast<Element>(0);
           // frag_ptr[idx] =  is_used;
-          // Pointer frag_ptr_reg = reinterpret_cast<Pointer>(&frag_ptr_orig[idx]);
-          // for (int i = 0; i < AccessSize; i++) {
-          //   // frag_ptr_reg[i] = i;
-          //   frag_ptr[idx + i] =  + major_coord;
-          // }
+          Pointer frag_ptr_reg = reinterpret_cast<Pointer>(&frag_ptr_orig[idx]);
+          // When we are right operand, there is no way to load data as a vector
+          // For left operand, we could try loading consecutive elements, but need to investigate
+          // border handling
 
-          // TODO(klecki) this is really a WIP, we need to implement it only for the cases we need it
-          // there is no way the window wraps around to us when we're not already covered with original element
-          // TODO(klecki): This is the slow part, it really needs to be optimized. (maybe bank conflicts)
-          if (is_used) {
-            int dist_up = -major_coord;
-            int dist_down = major_extent - 1 - major_coord;
-            // add all negative coordinates, pattern is twice the dist up, twice the dist down.
-            int neg_element = window_element;
-            while (true) {
-              neg_element += 2 * dist_up;
-              if (-neg_element <= radius) {
-                if (dist_up != 0)
-                  frag_ptr[idx] += *(pointer_ + radius + neg_element);
-              } else {
-                break;
+          // TODO(klecki): we actually need to zero out something, huh
+          for (int a = 0;  address_iterator_.valid() && a <AccessSize; a++) {
+
+            // for lhs operand, the problem is transposed and the channel computation can be skipped
+            // distance from diagonal in major coordinate direction
+            int diag_dist = major_coord - minor_coord; // distance from diagonal - coordinate (x, x), negative are above
+
+            // TODO(klecki) do a switch over channels, so we divide by constant almost everytime
+            // TODO(klecki): pack as function:
+            int window_element = kInnerConv ? diag_dist / channels_ : diag_dist;
+            int radius = window_size_ / 2;
+            // element is used if it's our channel (we're multiple of `channels_` from diagonal)
+            // and we still fit in the window
+            bool is_used = (::abs(window_element) <= radius) &&
+                (kInnerConv ? (window_element * channels_ == diag_dist) : true);
+
+            // pointer_ + radius is center of the window
+            const auto *access_element = pointer_ + radius + window_element;
+
+            frag_ptr_reg[a] = is_used ? *access_element : static_cast<Element>(0);
+
+
+            // TODO(klecki) this is really a WIP, we need to implement it only for the cases we need it
+            // there is no way the window wraps around to us when we're not already covered with original element
+            // TODO(klecki): This is the slow part, it really needs to be optimized. (maybe bank conflicts)
+            if (is_used) {
+              int dist_up = -major_coord;
+              int dist_down = major_extent - 1 - major_coord;
+              // add all negative coordinates, pattern is twice the dist up, twice the dist down.
+              int neg_element = window_element;
+              while (true) {
+                neg_element += 2 * dist_up;
+                if (-neg_element <= radius) {
+                  if (dist_up != 0)
+                    frag_ptr_reg[a] += *(pointer_ + radius + neg_element);
+                } else {
+                  break;
+                }
+                neg_element -= 2 * dist_down;
+                if (-neg_element <= radius) {
+                  if (dist_down != 0)
+                    frag_ptr_reg[a] += *(pointer_ + radius + neg_element);
+                } else {
+                  break;
+                }
               }
-              neg_element -= 2 * dist_down;
-              if (-neg_element <= radius) {
-                if (dist_down != 0)
-                  frag_ptr[idx] += *(pointer_ + radius + neg_element);
-              } else {
-                break;
+              // add all positive coordinates
+              int pos_element = window_element;
+              while (true) {
+                pos_element += 2 * dist_down;
+                if (pos_element <= radius) {
+                  if (dist_down != 0)
+                    frag_ptr_reg[a] += *(pointer_ + radius + pos_element);
+                } else {
+                  break;
+                }
+                pos_element -= 2 * dist_up;
+                if (pos_element <= radius) {
+                  if (dist_up != 0)
+                  frag_ptr_reg[a] += *(pointer_ + radius + pos_element);
+                } else {
+                  break;
+                }
               }
             }
-            // add all positive coordinates
-            int pos_element = window_element;
-            while (true) {
-              pos_element += 2 * dist_down;
-              if (pos_element <= radius) {
-                if (dist_down != 0)
-                  frag_ptr[idx] += *(pointer_ + radius + pos_element);
-              } else {
-                break;
-              }
-              pos_element -= 2 * dist_up;
-              if (pos_element <= radius) {
-                if (dist_up != 0)
-                frag_ptr[idx] += *(pointer_ + radius + pos_element);
-              } else {
-                break;
-              }
+            if (kInnerConv) {
+              minor_coord++;
+            } else {
+              major_coord++;
             }
           }
+
           ++address_iterator_;
         }
       }

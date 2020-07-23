@@ -78,9 +78,9 @@
 
 static constexpr int kWindowSize = 17;
 
-using A_type = float; //cutlass::half_t;
-using B_type = float; //cutlass::half_t;
-using C_type = float; //cutlass::half_t;
+using A_type = cutlass::half_t;
+using B_type = cutlass::half_t;
+using C_type = cutlass::half_t;
 
 /// Define a CUTLASS GEMM template and launch a GEMM kernel.
 cudaError_t CutlassSgemmNN(
@@ -131,26 +131,26 @@ cudaError_t CutlassSgemmNN(
   // !!!! WE NEED THIS SO IT CAN ACTUALLY RUN ON Tensor Cores, the default is different
   using ShapeMMAOp = cutlass::gemm::GemmShape<8, 8, 4>;  // <- MMA Op tile M = 8, N = 8, K = 4
 
-  using CutlassConv = cutlass::gemm::device::Conv<A_type,        // Data-type of A matrix
-                                                  RowMajor,  // Layout of A matrix
-                                                  B_type,        // Data-type of B matrix
-                                                  C_type,        // Data-type of C matrix
-                                                  RowMajor, 2, true>; // Layout of C matrix
-
-
   // using CutlassConv = cutlass::gemm::device::Conv<A_type,        // Data-type of A matrix
   //                                                 RowMajor,  // Layout of A matrix
   //                                                 B_type,        // Data-type of B matrix
   //                                                 C_type,        // Data-type of C matrix
-  //                                                 RowMajor,    // Layout of C matrix
-  //                                                 2, true, // axes, InnerConv
-  //                                                 C_type,  // element acumulator
-  //                                                 MMAOp, // tensor op
-  //                                                 SmArch, // arch 70
-  //                                                 ShapeMMAThreadBlock, // we can probably leave default shapes, but we need gemm 8x8x4
-  //                                                 ShapeMMAWarp,
-  //                                                 ShapeMMAOp
-  //                                                 >;
+  //                                                 RowMajor, 2, true>; // Layout of C matrix
+
+
+  using CutlassConv = cutlass::gemm::device::Conv<A_type,        // Data-type of A matrix
+                                                  RowMajor,  // Layout of A matrix
+                                                  B_type,        // Data-type of B matrix
+                                                  C_type,        // Data-type of C matrix
+                                                  RowMajor,    // Layout of C matrix
+                                                  2, true, // axes, InnerConv
+                                                  C_type,  // element acumulator
+                                                  MMAOp, // tensor op
+                                                  SmArch, // arch 70
+                                                  ShapeMMAThreadBlock, // we can probably leave default shapes, but we need gemm 8x8x4
+                                                  ShapeMMAWarp,
+                                                  ShapeMMAOp
+                                                  >;
 
   // Define a CUTLASS GEMM type
   CutlassConv gemm_operator;
@@ -749,25 +749,25 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta) {
 
   // dbg(host_reference);
   // dbg(host_cutlass);
-  // std::cout << "CUTLASS A" << std::endl;
-  // print_mat(M, K, host_a);
+  std::cout << "CUTLASS A" << std::endl;
+  print_mat(M, K, host_a);
   // std::cout << "CUTLASS B" << std::endl;
   // print_mat(K, N, host_b);
 
-  // std::cout << "CUTLASS reference" << std::endl;
-  // print_mat(M, N, host_reference);
+  std::cout << "CUTLASS reference" << std::endl;
+  print_mat(M, N, host_reference);
 
-  // std::cout << "CUTLASS C" << std::endl;
-  // print_mat(M, N, host_cutlass, M, N);
-  // for (int row = 0; row < M; row++) {
-  //   for (int col = 0; col < N; col++) {
-  //     if (host_cutlass[row * ldc + col] != host_reference[row * ldc + col]) {
-  //       std::cerr << "CUTLASS results incorrect: (" << row << ", " << col << "): "
-  //         << static_cast<float>(host_cutlass[row * ldc + col]) << " != " << static_cast<float>(host_reference[row * ldc + col]) << std::endl;
-  //         return cudaErrorUnknown;
-  //     }
-  //   }
-  // }
+  std::cout << "CUTLASS C" << std::endl;
+  print_mat(M, N, host_cutlass, M, N);
+  for (int row = 0; row < M; row++) {
+    for (int col = 0; col < N; col++) {
+      if (host_cutlass[row * ldc + col] != host_reference[row * ldc + col]) {
+        std::cerr << "CUTLASS results incorrect: (" << row << ", " << col << "): "
+          << static_cast<float>(host_cutlass[row * ldc + col]) << " != " << static_cast<float>(host_reference[row * ldc + col]) << std::endl;
+          // return cudaErrorUnknown;
+      }
+    }
+  }
   if (host_cutlass != host_reference) {
     std::cerr << "CUTLASS results incorrect." << std::endl;
 
