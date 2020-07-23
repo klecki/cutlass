@@ -402,6 +402,7 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
 
           // TODO(klecki) this is really a WIP, we need to implement it only for the cases we need it
           // there is no way the window wraps around to us when we're not already covered with original element
+          // TODO(klecki): This is the slow part, it really needs to be optimized. (maybe bank conflicts)
           if (is_used) {
             int dist_up = -major_coord;
             int dist_down = major_extent - 1 - major_coord;

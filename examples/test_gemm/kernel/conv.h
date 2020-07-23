@@ -315,6 +315,13 @@ struct Conv {
 
     // Compute initial location in logical coordinates // KL: all threads have the same value here
     // we need to make this "more virtual"
+
+    // the offset to the resulting matrix
+    cutlass::MatrixCoord tb_offset_C{
+      threadblock_tile_offset.m() * Mma::Shape::kM,
+      threadblock_tile_offset.n() * Mma::Shape::kN
+    };
+
     cutlass::MatrixCoord tb_offset_A{
       threadblock_tile_offset.m() * Mma::Shape::kM,
       threadblock_tile_offset.k() * params.gemm_k_size,
