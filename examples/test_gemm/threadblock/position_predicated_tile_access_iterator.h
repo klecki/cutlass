@@ -35,6 +35,10 @@
     A precomputed "Params" object minimizes the amount of state that must be
    stored in registers, and integer addition is used to advance the pointer
    through memory.
+
+
+   We don't care about predication, as the other tile iterator will still mask & zero-out
+   the inputs.
 */
 
 #pragma once
@@ -182,9 +186,6 @@ class PositionPredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear
   /// Parameters object with precomputed internal state
   Params const &params_;
 
-  /// Internal pointer to first access of tile
-  BytePointer pointer_;
-
   /// Guard predicates
   uint32_t predicates_[kPredicateWordCount];
 
@@ -294,8 +295,6 @@ class PositionPredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear
       /// Initial offset of threadblock
       TensorCoord const &threadblock_offset)
       : params_(params),
-        pointer_(reinterpret_cast<BytePointer>(
-            const_cast<NonConstPointer>(pointer))),
         extent_(extent),
         is_residue_tile_(true) {
 
@@ -330,10 +329,6 @@ class PositionPredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear
     // Per-thread offset in logical coordinates of tensor
     thread_offset_ = threadblock_offset + ThreadMap::initial_offset(thread_id);
 
-    // update internal pointers
-    Layout layout(params_.stride_);
-    add_pointer_offset(layout(thread_offset_));
-
     compute_predicates_(residue_extent, false);
 
     set_iteration_index(0);
@@ -365,12 +360,6 @@ class PositionPredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear
 
   }
 
-  /// Adds a pointer offset in units of Element
-  CUTLASS_HOST_DEVICE
-  void add_pointer_offset(LongIndex pointer_offset) {
-    pointer_ += sizeof_bits<Element>::value * pointer_offset / 8;
-  }
-
   /// Advances an iterator along logical dimensions of matrix in units of whole tiles
   CUTLASS_DEVICE
   void add_tile_offset(
@@ -386,29 +375,26 @@ class PositionPredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear
 
       thread_offset_ += residue_offset_;
 
-      Layout layout(params_.stride_);
-      add_pointer_offset(layout(residue_offset_));
-
       compute_predicates_(extent_, true);
 
       if (kAdvanceRank) {
-        pointer_ += params_.inc_advance_ * LongIndex(tile_offset.strided() - 1);
-        pointer_ += Shape::kContiguous * tile_offset.contiguous();
+        // pointer_ += params_.inc_advance_ * LongIndex(tile_offset.strided() - 1);
+        // pointer_ += Shape::kContiguous * tile_offset.contiguous();
       } else {
-        pointer_ += params_.inc_advance_ * LongIndex(tile_offset.contiguous() - 1);
-        pointer_ += Shape::kStrided * tile_offset.strided();
+        // pointer_ += params_.inc_advance_ * LongIndex(tile_offset.contiguous() - 1);
+        // pointer_ += Shape::kStrided * tile_offset.strided();
       }
     } else {
       // TODO(klecki): This is basically by experiment, but we can get rid of most of the
       // pointer arithmetic here and just the position calculation
       added_offset_ += tile_offset * TensorCoord(Shape::kContiguous, Shape::kStrided);
-      if (kAdvanceRank) {
-        pointer_ += params_.inc_advance_ * LongIndex(tile_offset.strided());
-        pointer_ += Shape::kContiguous * tile_offset.contiguous();
-      } else {
-        pointer_ += params_.inc_advance_ * LongIndex(tile_offset.contiguous());
-        pointer_ += Shape::kStrided * tile_offset.strided();
-      }
+      // if (kAdvanceRank) {
+      //   pointer_ += params_.inc_advance_ * LongIndex(tile_offset.strided());
+      //   pointer_ += Shape::kContiguous * tile_offset.contiguous();
+      // } else {
+      //   pointer_ += params_.inc_advance_ * LongIndex(tile_offset.contiguous());
+      //   pointer_ += Shape::kStrided * tile_offset.strided();
+      // }
     }
     is_residue_tile_ = false;
   }
@@ -427,12 +413,12 @@ class PositionPredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear
   }
 
   /// Returns a pointer
-  CUTLASS_HOST_DEVICE
-  AccessType *get() const {
-    return reinterpret_cast<AccessType *>(
-        pointer_ +
-        iteration_contiguous_ * (ThreadMap::Delta::kContiguous * sizeof_bits<Element>::value) / 8) + iteration_vector_;
-  }
+  // CUTLASS_HOST_DEVICE
+  // AccessType *get() const {
+  //   return reinterpret_cast<AccessType *>(
+  //       pointer_ +
+  //       iteration_contiguous_ * (ThreadMap::Delta::kContiguous * sizeof_bits<Element>::value) / 8) + iteration_vector_;
+  // }
 
   /// Increment and return an instance to self.
   CUTLASS_HOST_DEVICE
@@ -456,7 +442,7 @@ class PositionPredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear
     ++iteration_strided_;
 
     if (iteration_strided_ < ThreadMap::Iterations::kStrided) {
-      pointer_ += params_.inc_strided_;
+      // pointer_ += params_.inc_strided_;
       return *this;
     }
 
@@ -464,13 +450,13 @@ class PositionPredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear
     // which means we enter the next tile.
     iteration_strided_ = 0;
 
-    // advance to next tile
-    pointer_ += params_.inc_next_;
+    // // advance to next tile
+    // pointer_ += params_.inc_next_;
 
-    // now return to start tile - if the iterator is subsequently advanced, this
-    // subtraction as well as the subsequent integer addition are both elided by
-    // the compiler.
-    pointer_ -= params_.inc_advance_;
+    // // now return to start tile - if the iterator is subsequently advanced, this
+    // // subtraction as well as the subsequent integer addition are both elided by
+    // // the compiler.
+    // pointer_ -= params_.inc_advance_;
 
     return *this;
   }
@@ -515,7 +501,7 @@ class PositionPredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear
   /// Gets the mask
   CUTLASS_HOST_DEVICE
   void get_mask(Mask &mask) {
-     CUTLASS_PRAGMA_UNROLL
+    CUTLASS_PRAGMA_UNROLL
     for (int i = 0; i < kPredicateWordCount; ++i) {
       mask[i] = predicates_[i];
     }
@@ -652,10 +638,10 @@ class PositionPredicatedTileAccessIterator<Shape_, Element_, layout::ColumnMajor
   void set_iteration_index(int index) { iterator_.set_iteration_index(index); }
 
   /// Adds a pointer offset in units of Element
-  CUTLASS_HOST_DEVICE
-  void add_pointer_offset(LongIndex pointer_offset) {
-    iterator_.add_pointer_offset(pointer_offset);
-  }
+  // CUTLASS_HOST_DEVICE
+  // void add_pointer_offset(LongIndex pointer_offset) {
+  //   iterator_.add_pointer_offset(pointer_offset);
+  // }
 
   /// Advances an iterator along logical dimensions of matrix in units of whole
   /// tiles
@@ -828,10 +814,10 @@ class PositionPredicatedTileAccessIterator<Shape_, Element_, layout::RowMajor,
   void set_iteration_index(int index) { iterator_.set_iteration_index(index); }
 
   /// Adds a pointer offset in units of Element
-  CUTLASS_HOST_DEVICE
-  void add_pointer_offset(LongIndex pointer_offset) {
-    iterator_.add_pointer_offset(pointer_offset);
-  }
+  // CUTLASS_HOST_DEVICE
+  // void add_pointer_offset(LongIndex pointer_offset) {
+  //   iterator_.add_pointer_offset(pointer_offset);
+  // }
 
   /// Advances an iterator along logical dimensions of matrix in units of whole
   /// tiles
@@ -1010,10 +996,10 @@ class PositionPredicatedTileAccessIterator<Shape_, Element_,
   void set_iteration_index(int index) { iterator_.set_iteration_index(index); }
 
   /// Adds a pointer offset in units of Element
-  CUTLASS_HOST_DEVICE
-  void add_pointer_offset(LongIndex pointer_offset) {
-    iterator_.add_pointer_offset(pointer_offset);
-  }
+  // CUTLASS_HOST_DEVICE
+  // void add_pointer_offset(LongIndex pointer_offset) {
+  //   iterator_.add_pointer_offset(pointer_offset);
+  // }
 
   /// Advances an iterator along logical dimensions of matrix in units of whole
   /// tiles
@@ -1190,10 +1176,10 @@ class PositionPredicatedTileAccessIterator<Shape_, Element_,
   void set_iteration_index(int index) { iterator_.set_iteration_index(index); }
 
   /// Adds a pointer offset in units of Element
-  CUTLASS_HOST_DEVICE
-  void add_pointer_offset(LongIndex pointer_offset) {
-    iterator_.add_pointer_offset(pointer_offset);
-  }
+  // CUTLASS_HOST_DEVICE
+  // void add_pointer_offset(LongIndex pointer_offset) {
+  //   iterator_.add_pointer_offset(pointer_offset);
+  // }
 
   /// Advances an iterator along logical dimensions of matrix in units of whole
   /// tiles

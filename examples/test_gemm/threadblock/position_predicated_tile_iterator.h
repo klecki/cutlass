@@ -285,8 +285,6 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
   /// pointer.
   CUTLASS_HOST_DEVICE
   PositionPredicatedTileIterator &operator++() {
-    // PRINT_IF
-    //   printf("PositionPredicatedTileIterator++\n");
     if (kAdvanceRank)
       address_iterator_.add_tile_offset({0, 1});
     else
