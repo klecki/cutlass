@@ -129,15 +129,15 @@ the output from CUTLASS kernel is same as reference GEMM kernel.
 
 // The code section below describes datatype for input, output matrices and computation between
 // elements in input matrices.
-using ElementAccumulator = float;                   // <- data type of accumulator
+using ElementAccumulator = cutlass::half_t;                   // <- data type of accumulator
 using ElementComputeEpilogue = ElementAccumulator;  // <- data type of epilogue operations
 using ElementInputA = cutlass::half_t;              // <- data type of elements in input matrix A
 using ElementInputB = cutlass::half_t;              // <- data type of elements in input matrix B
-using ElementOutput = float;                        // <- data type of elements in output matrix D
+using ElementOutput = cutlass::half_t;                        // <- data type of elements in output matrix D
 
 // The code section below describes matrix layout of input and output matrices. Column Major for
 // Matrix A, Row Major for Matrix B and Row Major for Matrix C
-using LayoutInputA = cutlass::layout::ColumnMajor;
+using LayoutInputA = cutlass::layout::RowMajor;
 using LayoutInputB = cutlass::layout::RowMajor;
 using LayoutOutput = cutlass::layout::RowMajor;
 
@@ -206,9 +206,9 @@ int run() {
     return 0;
   }
 
-  const int length_m = 5120;
-  const int length_n = 4096;
-  const int length_k = 4096;
+  const int length_m = 2048;
+  const int length_n = 2048;
+  const int length_k = 2048;
 
   // Create a tuple of problem size for matrix multiplication
   cutlass::gemm::GemmCoord problem_size(length_m, length_n, length_k);

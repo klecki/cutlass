@@ -20,64 +20,8 @@
 # STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-set(CUTLASS_EXAMPLES_COMMON_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/common)
-
-function(cutlass_example_add_executable NAME)
-
-  set(options)
-  set(oneValueArgs)
-  set(multiValueArgs)
-  cmake_parse_arguments(_ "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
-
-  cutlass_add_executable(${NAME} ${__UNPARSED_ARGUMENTS})
-
-  target_link_libraries(
-    ${NAME}
-    PRIVATE
-    CUTLASS
-    cutlass_tools_util_includes
-    )
-
-  target_include_directories(
-    ${NAME}
-    PRIVATE
-    ${CUTLASS_EXAMPLES_COMMON_SOURCE_DIR}
-    )
-
-  add_custom_target(
-    test_${NAME}
-    COMMAND
-    ${CUTLASS_TEST_EXECUTION_ENVIRONMENT} $<TARGET_FILE:${NAME}>
-  DEPENDS
-    ${NAME}
-    )
-
-endfunction()
-
-add_custom_target(cutlass_examples)
-add_custom_target(test_examples)
-
-foreach(EXAMPLE
-  00_basic_gemm
+cutlass_example_add_executable(
   00_basic_gemm_row_major
-  # 01_cutlass_utilities
-  # 02_dump_reg_shmem
-  # 03_visualize_layout
-  # 04_tile_iterator
-  # 05_batched_gemm
-  # 06_splitK_gemm
-  07_volta_tensorop_gemm
-  # 08_turing_tensorop_gemm
-  # 10_planar_complex
-  # 11_planar_complex_array
-  # 12_gemm_bias_relu
-  13_fused_two_gemms
-  04_tile_iterator_how
-  test_gemm
+  basic_gemm.cu
 )
 
-  add_subdirectory(${EXAMPLE})
-  add_dependencies(cutlass_examples ${EXAMPLE})
-  add_dependencies(test_examples test_${EXAMPLE})
-
-endforeach()
