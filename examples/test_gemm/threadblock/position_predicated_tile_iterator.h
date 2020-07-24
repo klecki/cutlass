@@ -183,6 +183,9 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
 
   /// Type used for internal memory accesses
   using AccessType = AlignedArray<Element, AccessSize, (AccessSize * sizeof_bits<Element>::value / 8)>;
+  // using ReadType = AlignedArray<Element, AccessSize, sizeof(Element)>;
+  using ReadType = AccessType;
+  // using ReadType = Array<Element, AccessSize>;
   // static_assert(AccessSize == 1, "I can't access more than one element as I don't know how the coords work in that case");
 
   /// Underlying iterator to compute the addresses
@@ -351,6 +354,7 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
           int idx = (v + kAccessesPerVector * (c + s * ThreadMap::Iterations::kContiguous));
           // This is to mark the iteration number as a compile time constant
           address_iterator_.set_iteration_index(idx);
+
           // This calculates the logical coordinate of the beggining of access
           TensorCoord current_coord = address_iterator_.get_current_coord();
           // if (address_iterator_.valid())
@@ -376,22 +380,103 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
           }
 
           // Pointer frag_ptr_reg = reinterpret_cast<Pointer>(&frag_ptr[idx]);
-          AccessType frag_access_target;
+          // AccessType frag_access_target;
           // Debug<AccessType>::AccessType t;
           // When we are right operand, there is no way to load data as a vector
           // For left operand, we could try loading consecutive elements, but need to investigate
           // border handling
 
           // TODO(klecki): we actually need to zero out something, huh
-          for (int a = 0;  address_iterator_.valid() && a <AccessSize; a++) {
+          bool is_valid = address_iterator_.valid();
+          // for lhs operand, the problem is transposed and the channel computation can be skipped
+          // distance from diagonal in major coordinate direction
+          int diag_dist = major_coord - minor_coord; // distance from diagonal - coordinate (x, x), negative are above
+          // this is the starting element of the window, for inner-conv vector load goes in negative order
+          int window_element = diag_dist;
+          int radius = window_size_ / 2;
+          // element is used if it's our channel (we're multiple of `channels_` from diagonal)
+          // and we still fit in the window
+          bool is_used = (::abs(window_element) <= radius) &&
+              (kInnerConv ? (window_element * channels_ == diag_dist) : true);
+          // pointer_ + radius is center of the window
+          // window_element = is_used ? window_element : -256;
+          // printf("WTF: %d %d\n", threadIdx.x,  window_element);
+          // printf(">>[%d] LOADING COORD: (%d, %d) -> %d, %d\n", threadIdx.x, major_coord, minor_coord, window_element, (int)address_iterator_.valid());
+          assert(kInnerConv); // for inner conv, we reverse the windows, as the indices are row-decreasing
+          window_element *= -1;
+          int low = window_element >= 0 ? (window_element / 8) * 8 : ((window_element -7) / 8) * 8;
+          int high = low + 8;
+          int offset = window_element - low;
+          // window_element = (window_element / 8) * 8;
+          const auto *access_elements = reinterpret_cast<AccessType const *>(pointer_ + 256 + low);
+          if (is_used) {
+            // Deal with alignement issues
+            auto low_loaded = *access_elements;
+            auto high_loaded = *(access_elements + 1);
+            AccessType frag_access_target;
+            #pragma unroll
+            for (int i = offset; i < 8; i++) {
+              frag_access_target[i - offset] = static_cast<Element>(low_loaded[i]);
 
+            }
+            #pragma unroll
+            for (int i = 0; i < offset; i++) {
+              frag_access_target[8 - offset + i] = static_cast<Element>(high_loaded[i]);
+            }
+            // frag_access_target[0] = static_cast<Element>(major_coord);
+            // frag_access_target[1] = static_cast<Element>(minor_coord);
+            frag_ptr[idx] = frag_access_target;
+            // TODO same thing as below, but on vectors
+            // We need to handle computation during muxing like above
+          } else {
+            frag_ptr[idx] = AccessType{};
+          }
+
+          // if (threadIdx.x == 0) {
+          //   printf("Element: %d, low: %d, high %d; value: %d; offset: %d \t\t %d, %d, %d, %d, %d, %d, %d, %d \t\t %d, %d, %d, %d, %d, %d, %d, %d\n",
+          //     window_element, low, high, static_cast<int>(*(pointer_ + 256 + window_element)), offset,
+          //     static_cast<int>(frag_access_target[0]),
+          //     static_cast<int>(frag_access_target[1]),
+          //     static_cast<int>(frag_access_target[2]),
+          //     static_cast<int>(frag_access_target[3]),
+          //     static_cast<int>(frag_access_target[4]),
+          //     static_cast<int>(frag_access_target[5]),
+          //     static_cast<int>(frag_access_target[6]),
+          //     static_cast<int>(frag_access_target[7]),
+          //     static_cast<int>(low_loaded[0]),
+          //     static_cast<int>(low_loaded[1]),
+          //     static_cast<int>(low_loaded[2]),
+          //     static_cast<int>(low_loaded[3]),
+          //     static_cast<int>(low_loaded[4]),
+          //     static_cast<int>(low_loaded[5]),
+          //     static_cast<int>(low_loaded[6]),
+          //     static_cast<int>(low_loaded[7]));
+          // }
+          // return;
+
+          # if 0
+          for (int a = 0; is_valid && a < AccessSize; a++) {
+            // Element calculated_element = static_cast<Element>(major_coord + minor_coord);
             // for lhs operand, the problem is transposed and the channel computation can be skipped
             // distance from diagonal in major coordinate direction
             int diag_dist = major_coord - minor_coord; // distance from diagonal - coordinate (x, x), negative are above
 
             // TODO(klecki) do a switch over channels, so we divide by constant almost everytime
             // TODO(klecki): pack as function:
-            int window_element = kInnerConv ? diag_dist / channels_ : diag_dist;
+            int window_element = diag_dist;
+            if (kInnerConv) {
+              switch (channels_) {
+                case 1:
+                break;
+                case 3:
+                  window_element /= 3;
+                break;
+                default:
+                  window_element /= channels_;
+                break;
+              }
+            }
+            // int window_element = kInnerConv ? diag_dist / channels_ : diag_dist;
             int radius = window_size_ / 2;
             // element is used if it's our channel (we're multiple of `channels_` from diagonal)
             // and we still fit in the window
@@ -453,10 +538,13 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
             } else {
               major_coord++;
             }
-            frag_access_target[a] = calculated_element;
+            // frag_access_target[a] = calculated_element;
+            frag_ptr[idx][a] = calculated_element;
           }
-          frag_ptr[idx] = frag_access_target;
-
+          // if (is_used)
+            frag_ptr[idx] = frag_access_target;
+            #endif
+          // auto * in = reinterpret_cast<AccessType const *>(pointer_ + AccessSize * threadIdx.x);
           ++address_iterator_;
         }
       }

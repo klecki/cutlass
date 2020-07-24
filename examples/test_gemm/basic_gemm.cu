@@ -79,9 +79,9 @@ int print = 1;
 
 static constexpr int kWindowSize = 53;
 
-using A_type = float; //cutlass::half_t;
-using B_type = float; //cutlass::half_t;
-using C_type = float; //cutlass::half_t;
+using A_type = cutlass::half_t;
+using B_type = cutlass::half_t;
+using C_type = cutlass::half_t;
 
 /// Define a CUTLASS GEMM template and launch a GEMM kernel.
 cudaError_t CutlassSgemmNN(
@@ -132,26 +132,26 @@ cudaError_t CutlassSgemmNN(
   // !!!! WE NEED THIS SO IT CAN ACTUALLY RUN ON Tensor Cores, the default is different
   using ShapeMMAOp = cutlass::gemm::GemmShape<8, 8, 4>;  // <- MMA Op tile M = 8, N = 8, K = 4
 
-  using CutlassConv = cutlass::gemm::device::Conv<A_type,        // Data-type of A matrix
-                                                  RowMajor,  // Layout of A matrix
-                                                  B_type,        // Data-type of B matrix
-                                                  C_type,        // Data-type of C matrix
-                                                  RowMajor, 2, true>; // Layout of C matrix
-
-
   // using CutlassConv = cutlass::gemm::device::Conv<A_type,        // Data-type of A matrix
   //                                                 RowMajor,  // Layout of A matrix
   //                                                 B_type,        // Data-type of B matrix
   //                                                 C_type,        // Data-type of C matrix
-  //                                                 RowMajor,    // Layout of C matrix
-  //                                                 2, true, // axes, InnerConv
-  //                                                 C_type,  // element acumulator
-  //                                                 MMAOp, // tensor op
-  //                                                 SmArch, // arch 70
-  //                                                 ShapeMMAThreadBlock, // we can probably leave default shapes, but we need gemm 8x8x4
-  //                                                 ShapeMMAWarp,
-  //                                                 ShapeMMAOp
-  //                                                 >;
+  //                                                 RowMajor, 2, true>; // Layout of C matrix
+
+
+  using CutlassConv = cutlass::gemm::device::Conv<A_type,        // Data-type of A matrix
+                                                  RowMajor,  // Layout of A matrix
+                                                  B_type,        // Data-type of B matrix
+                                                  C_type,        // Data-type of C matrix
+                                                  RowMajor,    // Layout of C matrix
+                                                  2, true, // axes, InnerConv
+                                                  C_type,  // element acumulator
+                                                  MMAOp, // tensor op
+                                                  SmArch, // arch 70
+                                                  ShapeMMAThreadBlock, // we can probably leave default shapes, but we need gemm 8x8x4
+                                                  ShapeMMAWarp,
+                                                  ShapeMMAOp
+                                                  >;
 
   // Define a CUTLASS GEMM type
   CutlassConv gemm_operator;
@@ -565,7 +565,7 @@ void print_mat(int rows, int cols, const std::vector<T> &mat, int max_rows = -1,
 
 /// Allocate several matrices in GPU device memory and call a single-precision
 /// CUTLASS GEMM kernel.
-cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta) {
+cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta, bool innerConv) {
   cudaError_t result;
 
 
@@ -599,8 +599,10 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta) {
   result = AllocateMatrix(&A, lda, M, K, 0);
 
   B_type *window;
+  B_type *window_processed;
   int max_window = 1024;
   result = cudaMalloc(reinterpret_cast<void **>(&window), sizeof(B_type) * max_window);
+  result = cudaMalloc(reinterpret_cast<void **>(&window_processed), sizeof(B_type) * max_window);
   std::vector<B_type> window_host(max_window);
   for (int i = 0; i < radius; i++) {
     window_host[i] =  static_cast<B_type>(i);
@@ -614,7 +616,18 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta) {
     window_host[i] =  static_cast<B_type>(-42.f);
   }
 
+  std::vector<B_type> window_host_transformed(max_window, static_cast<B_type>(0));
+  for (int i = 0; i <= radius; i++) {
+    // btw, this is symmetric so widnow_center[-i] = window_center[+i]
+    window_host_transformed[256 + i] = window_host[radius - i];
+    window_host_transformed[256 - i] = window_host[radius + i];
+  }
+  for (int i = 0; i < 1024; i++) {
+    std::cout << i << ": " << static_cast<float>(window_host_transformed[i]) << std::endl;
+  }
+
   result = cudaMemcpy(window, window_host.data(), sizeof(B_type) * max_window, cudaMemcpyHostToDevice);
+  result = cudaMemcpy(window_processed, window_host_transformed.data(), sizeof(B_type) * max_window, cudaMemcpyHostToDevice);
 
 
 
@@ -665,7 +678,7 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta) {
   // Launch CUTLASS GEMM.
   //
 
-  result = CutlassSgemmNN(M, N, K, window_size, alpha, A, lda, window, beta, C_cutlass, ldc);
+  result = CutlassSgemmNN(M, N, K, window_size, alpha, A, lda, window_processed, beta, C_cutlass, ldc);
 
   if (result != cudaSuccess) {
     std::cerr << "CUTLASS GEMM kernel failed: "
@@ -685,7 +698,7 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta) {
 
   // Launch reference GEMM
   // result = ReferenceGemm(M, N, K, alpha, A, lda, B, ldb, beta, C_reference, ldc);
-  result = ReferenceConv(M, N, radius, alpha, A, lda, window + radius, beta, C_reference, ldc, true);
+  result = ReferenceConv(M, N, radius, alpha, A, lda, window + radius, beta, C_reference, ldc, innerConv);
 
   if (result != cudaSuccess) {
     std::cerr << "Reference GEMM kernel failed: "
@@ -818,7 +831,8 @@ int main(int argc, const char *arg[]) {
     problem[1],     // GEMM N dimension
     problem[2],     // GEMM K dimension
     scalars[0],     // alpha
-    scalars[1]      // beta
+    scalars[1],     // beta
+    true // inner conv
   );
 
   if (result == cudaSuccess) {

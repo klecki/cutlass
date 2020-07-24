@@ -216,9 +216,13 @@ struct Conv {
     using WindowIterator = transform::threadblock::PredicatedTileIterator<
         WindowShape, WindowElement, WindowLayout, 0, WindowThreadMap>;
 
-    cutlass::Coord<2> window_extent = cutlass::make_Coord(params.window_size, 1);
+    // cutlass::Coord<2> window_extent = cutlass::make_Coord(params.window_size, 1);
 
-    int iterations = (params.window_size + WindowShape::kContiguous - 1) / WindowShape::kContiguous;
+    // int iterations = (params.window_size + WindowShape::kContiguous - 1) / WindowShape::kContiguous;
+
+    // TODO(klecki): faked window that is already preprocessed
+    cutlass::Coord<2> window_extent = cutlass::make_Coord(1024, 1);
+    int iterations = (1024 + WindowShape::kContiguous - 1) / WindowShape::kContiguous;
 
     WindowIterator src_iterator(params.ref_conv_Window.layout(), params.ref_conv_Window.data(), window_extent, threadIdx.x);
     WindowIterator dst_iterator(window_smem.layout(), window_smem.data(), window_extent, threadIdx.x);
@@ -366,7 +370,7 @@ struct Conv {
     int thread_idx = threadIdx.x;
 
     auto window_smem = shared_storage.main_loop.operand_Window_ref(params.window_size);
-    // Transfer window from gmem to smem
+    // Transfer window from gmem to smem <- this is cheap (klecki)
     transfer_conv_window(params, window_smem);
 
 
