@@ -77,7 +77,7 @@
 
 int print = 1;
 
-static constexpr int kWindowSize = 53;
+static constexpr int kWindowSize = 15;
 
 using A_type = cutlass::half_t;
 using B_type = cutlass::half_t;

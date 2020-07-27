@@ -335,12 +335,81 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
     load_with_byte_offset(frag, pointer_offset * sizeof_bits<Element>::value / 8);
   }
 
+  // todo(klecki): place in private
+  CUTLASS_DEVICE
+  void mux(AccessType &dst, const AccessType &lo, const AccessType &hi, int offset) {
+    // offset is limited to 0..AccessSize
+    offset = ::max(0, ::min(offset, AccessSize));
+    #pragma unroll
+    for (int i = 0; i < AccessSize - offset; i++) {
+      dst[i] = static_cast<Element>(lo[i + offset]);
+    }
+    #pragma unroll
+    for (int i = AccessSize - offset; i < AccessSize; i++) {
+      dst[i] = static_cast<Element>(hi[i - AccessSize + offset]);
+    }
+  }
+
+  CUTLASS_DEVICE
+  void mux_add(AccessType &dst, const AccessType &lo, const AccessType &hi, int offset) {
+    // offset is limited to 0..AccessSize
+    offset = ::max(0, ::min(offset, AccessSize));
+    #pragma unroll
+    for (int i = 0; i < AccessSize - offset; i++) {
+      // TODO(klecki) there is an issue with half, that prohibits me from doing:
+      // dst[i] += static_cast<Element>(lo[i + offset]);
+      Element tmp = static_cast<Element>(dst[i]) + static_cast<Element>(lo[i + offset]);
+      dst[i] = tmp;
+    }
+    #pragma unroll
+    for (int i = AccessSize - offset; i < AccessSize; i++) {
+      Element tmp = static_cast<Element>(dst[i]) + static_cast<Element>(hi[i - AccessSize + offset]);
+      dst[i] = tmp;
+    }
+  }
+
+  CUTLASS_DEVICE
+  int get_lo_offset(int window_element) {
+    // for Inner Convolution the window is in reverse when traversing in contiguous axis
+    if (kInnerConv) {
+     window_element *= -1;
+    }
+    if (window_element >= 0) {
+      return (window_element / AccessSize) * AccessSize;
+    }
+    return ((window_element - (AccessSize - 1)) / AccessSize) * AccessSize;
+  }
+
+  CUTLASS_DEVICE
+  int get_offset(int window_element, int lo_offset) {
+    if (kInnerConv) {
+      assert(lo_offset <= -window_element);
+      return -window_element - lo_offset;
+    }
+    assert(lo_offset <= window_element);
+    return window_element - lo_offset;
+  }
+
+  template <bool init>
+  CUTLASS_DEVICE
+  void load_vec(AccessType &dst, int window_element) {
+    int lo_offset = get_lo_offset(window_element);
+    int offset = get_offset(window_element, lo_offset);
+    const auto *access_ptr = reinterpret_cast<AccessType const *>(pointer_ + 256 + lo_offset);
+    if (init) {
+      mux(dst, access_ptr[0], access_ptr[1], offset);
+    } else {
+      mux_add(dst, access_ptr[0], access_ptr[1], offset);
+    }
+  }
+
+
+
   CUTLASS_DEVICE
   void load_with_byte_offset(Fragment &frag, LongIndex byte_offset) {
     PRINT_IF
       printf("LOAD: kStrided: %d, kContiguous: %d, kAccessesPerVector: %d\n", ThreadMap::Iterations::kStrided, ThreadMap::Iterations::kContiguous, kAccessesPerVector);
 
-    // TODO(klecki): can we unlock the bigger access patterns?
     AccessType *frag_ptr = reinterpret_cast<AccessType *>(&frag);
 
     CUTLASS_PRAGMA_UNROLL
@@ -396,40 +465,85 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
           int radius = window_size_ / 2;
           // element is used if it's our channel (we're multiple of `channels_` from diagonal)
           // and we still fit in the window
-          bool is_used = (::abs(window_element) <= radius) &&
+          // TODO(klecki): is_used needs to be checked as if-any in AccessSize
+          int farthest_window = window_element < 0 ? window_element + AccessSize - 1 : window_element - AccessSize + 1;
+          bool is_used = (::abs(farthest_window) <= radius) &&
               (kInnerConv ? (window_element * channels_ == diag_dist) : true);
           // pointer_ + radius is center of the window
           // window_element = is_used ? window_element : -256;
           // printf("WTF: %d %d\n", threadIdx.x,  window_element);
           // printf(">>[%d] LOADING COORD: (%d, %d) -> %d, %d\n", threadIdx.x, major_coord, minor_coord, window_element, (int)address_iterator_.valid());
           assert(kInnerConv); // for inner conv, we reverse the windows, as the indices are row-decreasing
-          window_element *= -1;
-          int low = window_element >= 0 ? (window_element / 8) * 8 : ((window_element -7) / 8) * 8;
-          int high = low + 8;
-          int offset = window_element - low;
+          // window_element *= -1;
+          // int lo_offset = get_lo_offset(window_element);
+          // int offset = get_offset(window_element, lo_offset);
+          // int hi_offset = hi + AccessSize;
+          // int low = window_element >= 0 ? (window_element / 8) * 8 : ((window_element -7) / 8) * 8;
+          // int high = low + 8;
+          // int offset = window_element - low;
           // window_element = (window_element / 8) * 8;
-          const auto *access_elements = reinterpret_cast<AccessType const *>(pointer_ + 256 + low);
+          // const auto *access_elements = reinterpret_cast<AccessType const *>(pointer_ + 256 + lo_offset);
           if (is_used) {
-            // Deal with alignement issues
-            auto low_loaded = *access_elements;
-            auto high_loaded = *(access_elements + 1);
+            // Deal with alignment issues
+            // auto low_loaded = *access_elements;
+            // auto high_loaded = *(access_elements + 1);
             AccessType frag_access_target;
-            #pragma unroll
-            for (int i = offset; i < 8; i++) {
-              frag_access_target[i - offset] = static_cast<Element>(low_loaded[i]);
+            // mux(frag_access_target, access_elements[0], access_elements[1], offset);
+            load_vec<true>(frag_access_target, window_element);
 
-            }
-            #pragma unroll
-            for (int i = 0; i < offset; i++) {
-              frag_access_target[8 - offset + i] = static_cast<Element>(high_loaded[i]);
-            }
-            // frag_access_target[0] = static_cast<Element>(major_coord);
-            // frag_access_target[1] = static_cast<Element>(minor_coord);
-            frag_ptr[idx] = frag_access_target;
+            // frag_ptr[idx] = frag_access_target;
             // TODO same thing as below, but on vectors
             // We need to handle computation during muxing like above
+
+
+            // Border handling:
+
+            int dist_up = -major_coord;
+            int dist_down = major_extent - 1 - major_coord;
+            // add all negative coordinates, pattern is twice the dist up, twice the dist down.
+            // we need to have those checks for ANY element in the range
+            // TODO(klecki): for now only for the InnerConv - contiguous-coord decreasing
+            // access covers window_element .. window_element - AccessSize + 1
+            int neg_element = window_element;
+            while (true) {
+              neg_element += 2 * dist_up;
+              if (-neg_element <= radius) {
+                if (dist_up != 0)
+                  load_vec<false>(frag_access_target, neg_element);
+              } else {
+                break;
+              }
+              neg_element -= 2 * dist_down;
+              if (-neg_element <= radius) {
+                if (dist_down != 0)
+                  load_vec<false>(frag_access_target, neg_element);
+              } else {
+                break;
+              }
+            }
+            // add all positive coordinates
+            int pos_element = window_element;
+            while (true) {
+              pos_element += 2 * dist_down;
+              if (pos_element - AccessSize + 1 <= radius) {
+                if (dist_down != 0)
+                  load_vec<false>(frag_access_target, pos_element);
+              } else {
+                break;
+              }
+              pos_element -= 2 * dist_up;
+              if (pos_element - AccessSize + 1 <= radius) {
+                if (dist_up != 0)
+                  load_vec<false>(frag_access_target, pos_element);
+              } else {
+                break;
+              }
+            }
+            frag_ptr[idx] = frag_access_target;
           } else {
-            frag_ptr[idx] = AccessType{};
+            for (int i = 0; i < AccessSize; i++) {
+              frag_ptr[idx][i] = static_cast<Element>(0);
+            }
           }
 
           // if (threadIdx.x == 0) {
