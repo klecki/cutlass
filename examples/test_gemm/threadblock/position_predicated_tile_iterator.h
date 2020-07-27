@@ -465,19 +465,21 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
             // we need to have those checks for ANY element in the range
             // TODO(klecki): for now only for the InnerConv - contiguous-coord decreasing
             // access covers window_element .. window_element - AccessSize + 1
+            // TODO(klecki): The outer conv needs to mask out some elements of the vector
+            // when we are at the edge, and not the whole vectors
             int neg_element = window_element;
-            int neg_compensation = kInnerConv ? 0 : AccessSize - 1;
+            // int neg_compensation = kInnerConv ? 0 : AccessSize - 1;
             int pos_compensation = kInnerConv ? -AccessSize + 1 : 0;
             while (true) {
               neg_element += 2 * dist_up;
-              if (-neg_element + neg_compensation<= radius) {
+              if (-neg_element <= radius) {
                 if (dist_up != 0)
                   load_vec<false>(dst, neg_element);
               } else {
                 break;
               }
               neg_element -= 2 * dist_down;
-              if (-neg_element + neg_compensation <= radius) {
+              if (-neg_element <= radius) {
                 if (dist_down != 0)
                   load_vec<false>(dst, neg_element);
               } else {
