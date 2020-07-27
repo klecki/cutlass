@@ -466,16 +466,18 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
             // TODO(klecki): for now only for the InnerConv - contiguous-coord decreasing
             // access covers window_element .. window_element - AccessSize + 1
             int neg_element = window_element;
+            int neg_compensation = kInnerConv ? 0 : AccessSize - 1;
+            int pos_compensation = kInnerConv ? -AccessSize + 1 : 0;
             while (true) {
               neg_element += 2 * dist_up;
-              if (-neg_element <= radius) {
+              if (-neg_element + neg_compensation<= radius) {
                 if (dist_up != 0)
                   load_vec<false>(dst, neg_element);
               } else {
                 break;
               }
               neg_element -= 2 * dist_down;
-              if (-neg_element <= radius) {
+              if (-neg_element + neg_compensation <= radius) {
                 if (dist_down != 0)
                   load_vec<false>(dst, neg_element);
               } else {
@@ -486,14 +488,14 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
             int pos_element = window_element;
             while (true) {
               pos_element += 2 * dist_down;
-              if (pos_element - AccessSize + 1 <= radius) {
+              if (pos_element + pos_compensation <= radius) {
                 if (dist_down != 0)
                   load_vec<false>(dst, pos_element);
               } else {
                 break;
               }
               pos_element -= 2 * dist_up;
-              if (pos_element - AccessSize + 1 <= radius) {
+              if (pos_element + pos_compensation <= radius) {
                 if (dist_up != 0)
                   load_vec<false>(dst, pos_element);
               } else {
