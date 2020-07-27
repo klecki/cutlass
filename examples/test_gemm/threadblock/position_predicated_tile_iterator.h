@@ -933,6 +933,11 @@ public:
     iterator_.get_mask(mask);
   }
 
+  CUTLASS_HOST_DEVICE
+  TensorCoord get_residue_offset() {
+    return iterator_.get_residue_offset();
+  }
+
   /// Loads a fragment from memory
   CUTLASS_DEVICE
   void load_with_pointer_offset(Fragment &frag, Index pointer_offset) {

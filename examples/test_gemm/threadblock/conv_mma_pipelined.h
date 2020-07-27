@@ -223,6 +223,37 @@ public:
     this->warp_tile_iterator_B_.add_tile_offset({Base::kWarpGemmIterations * warp_idx_k, warp_idx_n});
   }
 
+  CUTLASS_DEVICE
+  int count_skip_before(MatrixCoord const &logical_coord, int radius, MatrixCoord const &residue_offset) {
+    if (kInnerConv) {
+      int n = logical_coord.column();
+      // we're interested in tile (row, col): (n - radius, n) -- (n + Shape::kN, n + Shape::kN + radius)
+      int k_start = n - radius;
+      int skipped = 0;
+      if (k_start > residue_offset.row() && residue_offset.row() > 0) {
+        skipped++;
+        k_start -= residue_offset.row();
+      }
+      skipped += k_start / Shape::kK;
+      return skipped;
+    }
+    // return {0, 0};
+    return 0;
+  }
+
+  CUTLASS_DEVICE
+  int count_effective_iters(MatrixCoord const &logical_coord, int radius) {
+    if (kInnerConv) {
+      int n = logical_coord.column();
+      // we're interested in tile (row, col): (n - radius, n) -- (n + Shape::kN, n + Shape::kN + radius)
+      int k_start = n - radius;
+      int k_end = n + Shape::kN + radius;
+      int diff = k_end - k_start;
+      return (diff + Shape::kK - 1) / Shape::kK;
+    }
+    return 0;
+  }
+
   /// Perform a threadblock-scoped matrix multiply-accumulate
   CUTLASS_DEVICE
   void operator()(
@@ -231,6 +262,7 @@ public:
     IteratorA iterator_A,                             ///< iterator over A operand in global memory
     IteratorB iterator_B,                             ///< iterator over B operand in global memory
     FragmentC const &src_accum,                       ///< source accumulator tile
+    cutlass::MatrixCoord const &logical_coord,
     TransformA transform_A = TransformA(),            ///< transformation applied to A fragment
     TransformB transform_B = TransformB()) {          ///< transformation applied to B fragment
 
@@ -249,13 +281,35 @@ public:
     tb_frag_A.clear();
     tb_frag_B.clear();
 
+
     auto &conv_iterator = select_conv_iterator<kInnerConv>(iterator_A, iterator_B);
     // TODO: need to propagate to wrappers
-    // auto residue_offset = conv_iterator.get_residue_offset();
+    auto residue_offset = conv_iterator.get_residue_offset();
+
+    logical_coord.row();  // m
+    logical_coord.column(); // n
+
+    // This tile?
+    Shape::kM;
+    Shape::kN;
+    Shape::kK;
+
+
+    int skip_iters = count_skip_before(logical_coord, 7, residue_offset);
+    int effective_iters = count_effective_iters(logical_coord, 7);
+    // if (threadIdx.x == 0)
+    //   printf("Skipped: %d, effective: %d, gemm_k_iterations %d, residue.row: %d\n", skip_iters, effective_iters, gemm_k_iterations, residue_offset.row());
+
+
+    // for (int i = 0; i < skip_iters; i++) {
+    //   ++iterator_A;
+    //   ++iterator_B;
+    // }
 
     // The last kblock is loaded in the prolog
     iterator_A.load(tb_frag_A);
     iterator_B.load(tb_frag_B);
+    // int to_skip =
     // iterator_A.
     // __syncthreads();
 
@@ -332,6 +386,9 @@ public:
 
     // PRINT_IF
       // printf("ConvMmaPipelined::operator() main_loop gemm_k_iterations %d, Base::kWarpGemmIterations: %d\n", gemm_k_iterations, Base::kWarpGemmIterations);
+    // gemm_k_iterations -= skip_iters;
+
+
 
     // Note: The main loop does not support Base::kWarpGemmIterations == 2.
     CUTLASS_GEMM_LOOP
