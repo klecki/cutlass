@@ -424,6 +424,9 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
 
           // This calculates the logical coordinate of the beggining of access
           TensorCoord current_coord = address_iterator_.get_current_coord();
+          // if (threadIdx.x == 0) {
+          //   printf("LOADING COORD: %d %d\n", current_coord.strided(), current_coord.contiguous());
+          // }
 
           // calculate based on the coord and access the pointer_ + appropriate offset
           int major_coord = 0;
@@ -451,7 +454,7 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
           // TODO(klecki): is_used needs to be checked as if-any in AccessSize
           int farthest_window = window_element < 0 ? window_element + AccessSize - 1 : window_element - AccessSize + 1;
           bool is_used = (::abs(farthest_window) <= radius) &&
-              (kInnerConv ? (window_element * channels_ == diag_dist) : true);
+              (kInnerConv ? (window_element * channels_ == diag_dist) : true) && address_iterator_.valid();
           assert(kInnerConv); // for inner conv, we reverse the windows, as the indices are row-decreasing
           if (is_used) {
             // Deal with alignment issues

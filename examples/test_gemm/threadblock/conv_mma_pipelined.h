@@ -258,6 +258,7 @@ public:
   CUTLASS_DEVICE
   void operator()(
     int gemm_k_iterations,                            ///< number of iterations of the mainloop
+    int end_iteration,
     FragmentC &accum,                                 ///< destination accumulator tile
     IteratorA iterator_A,                             ///< iterator over A operand in global memory
     IteratorB iterator_B,                             ///< iterator over B operand in global memory
@@ -392,7 +393,7 @@ public:
 
     // Note: The main loop does not support Base::kWarpGemmIterations == 2.
     CUTLASS_GEMM_LOOP
-    for (; gemm_k_iterations > 0; --gemm_k_iterations) {
+    for (; gemm_k_iterations > end_iteration; --gemm_k_iterations) {
       //
       // Loop over GEMM K dimension
       //

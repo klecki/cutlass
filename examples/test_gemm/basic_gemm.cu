@@ -622,9 +622,9 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta, bool
     window_host_transformed[256 + i] = window_host[radius - i];
     window_host_transformed[256 - i] = window_host[radius + i];
   }
-  for (int i = 0; i < 1024; i++) {
-    std::cout << i << ": " << static_cast<float>(window_host_transformed[i]) << std::endl;
-  }
+  // for (int i = 0; i < 1024; i++) {
+  //   std::cout << i << ": " << static_cast<float>(window_host_transformed[i]) << std::endl;
+  // }
 
   result = cudaMemcpy(window, window_host.data(), sizeof(B_type) * max_window, cudaMemcpyHostToDevice);
   result = cudaMemcpy(window_processed, window_host_transformed.data(), sizeof(B_type) * max_window, cudaMemcpyHostToDevice);

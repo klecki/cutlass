@@ -117,8 +117,8 @@ struct Conv {
     ):
       channels(channels),
       window_size(ref_conv_Window.stride(0)),
-      problem_size(problem_size),
-      grid_tiled_shape(grid_tiled_shape),
+      problem_size(problem_size), // actual problem size
+      grid_tiled_shape(grid_tiled_shape), // the grid used for the run (m, n, k), we assume k = 1
       params_In(ref_In.layout()),
       ref_In(ref_In),
       params_Window(layout::RowMajor(kInnerConv ? problem_size.n() : problem_size.m()), window_size, channels),
@@ -129,14 +129,20 @@ struct Conv {
       ref_D(ref_D),
       output_op(output_op) {
       gemm_k_size = calc_gemm_k_size(problem_size, grid_tiled_shape);
+      // if (threadIdx.x == 0){
+        printf("gemm_k_size: %d \n", gemm_k_size);
+      // }
 
       semaphore = workspace;
     }
 
     CUTLASS_HOST_DEVICE
     static int calc_gemm_k_size(gemm::GemmCoord const &problem_size, GemmCoord const &grid_tiled_shape) {
+      // total tiles that cover the k-dim
       int total_gemm_k_iterations = (problem_size.k() + Mma::Shape::kK - 1) / Mma::Shape::kK;
+      // how many iterations per block in the grid (grid_tiled_shape.k() is assumed to be 1)
       int gemm_k_iterations = (total_gemm_k_iterations + grid_tiled_shape.k() - 1) / grid_tiled_shape.k();
+      printf("total_gemm_k_iterations %d gemm_k_iterations %d\n", total_gemm_k_iterations, gemm_k_iterations);
       return gemm_k_iterations * Mma::Shape::kK;
     }
 
@@ -309,12 +315,44 @@ struct Conv {
   }
 
 
+  CUTLASS_DEVICE
+  int count_skip_before(MatrixCoord const &logical_coord, int radius, MatrixCoord const &residue_offset) {
+    if (kInnerConv) {
+      int n = logical_coord.column();
+      // we're interested in tile (row, col): (n - radius, n) -- (n + Shape::kN, n + Shape::kN + radius)
+      int k_start = n - radius;
+      int skipped = 0;
+      if (k_start > residue_offset.row() && residue_offset.row() > 0) {
+        skipped++;
+        k_start -= residue_offset.row();
+      }
+      skipped += k_start / Mma::Shape::kK;
+      return skipped;
+    }
+    // return {0, 0};
+    return 0;
+  }
+
+  CUTLASS_DEVICE
+  int count_effective_iters(MatrixCoord const &logical_coord, int radius) {
+    if (kInnerConv) {
+      int n = logical_coord.column();
+      // we're interested in tile (row, col): (n - radius, n) -- (n + Shape::kN, n + Shape::kN + radius)
+      int k_start = n - radius;
+      int k_end = n + Mma::Shape::kN + radius;
+      int diff = k_end - k_start;
+      return (diff + Mma::Shape::kK - 1) / Mma::Shape::kK;
+    }
+    return 0;
+  }
+
+
   /// Executes one GEMM
   CUTLASS_DEVICE
   void operator()(Params const &params, SharedStorage &shared_storage) {
 
     // Compute threadblock location
-    ThreadblockSwizzle threadblock_swizzle; // todo(klecki): build TB swizzle for out of bounds accesses
+    ThreadblockSwizzle threadblock_swizzle;
 
     cutlass::gemm::GemmCoord threadblock_tile_offset = threadblock_swizzle.get_tile_offset();
     // todo(klecki): here we know the actual tile!!! (global tile)
@@ -339,28 +377,55 @@ struct Conv {
       threadblock_tile_offset.n() * Mma::Shape::kN
     };
 
+    // TODO(klecki): adding skip offset to iterators offset is a bit buggy now
+    int skip = count_skip_before(tb_offset_C, 7, {0, 0});
+
+    // cutlass::MatrixCoord tb_offset_A{
+    //   threadblock_tile_offset.m() * Mma::Shape::kM,
+    //   threadblock_tile_offset.k() * params.gemm_k_size, // 0 * K_SIZE
+    // };
+
+    // cutlass::MatrixCoord tb_offset_B{
+    //   threadblock_tile_offset.k() * params.gemm_k_size,
+    //   threadblock_tile_offset.n() * Mma::Shape::kN
+    // };
+
+
+    int k_skipped_offset = max(0, threadblock_tile_offset.n() * Mma::Shape::kN - params.window_size / 2);
+    k_skipped_offset = (k_skipped_offset & ~(Mma::Shape::kK - 1));
+
     cutlass::MatrixCoord tb_offset_A{
       threadblock_tile_offset.m() * Mma::Shape::kM,
-      threadblock_tile_offset.k() * params.gemm_k_size,
+      k_skipped_offset // 0 * K_SIZE
     };
 
     cutlass::MatrixCoord tb_offset_B{
-      threadblock_tile_offset.k() * params.gemm_k_size,
+      k_skipped_offset,
       threadblock_tile_offset.n() * Mma::Shape::kN
     };
+
     // todo(klecki): and here are the tile coordinates, woohoo
-    PRINT_IF
-      printf("kernel::Conv::operator() threadIdx: (%d, %d, %d), A  row, col:(%d, %d), B row, col: (%d, %d) \n",
-      threadIdx.x, threadIdx.y, threadIdx.z, tb_offset_A.row(), tb_offset_A.column(), tb_offset_B.row(), tb_offset_B.column());
+    // PRINT_IF
+    // if (threadIdx.x == 0)
+    //   printf("kernel::Conv::operator() threadIdx: (%d, %d, %d), A  row, col:(%d, %d), B row, col: (%d, %d) \n",
+    //   threadIdx.x, threadIdx.y, threadIdx.z, tb_offset_A.row(), tb_offset_A.column(), tb_offset_B.row(), tb_offset_B.column());
 
     // Problem size is a function of threadblock index in the K dimension
     int problem_size_k = min(
       params.problem_size.k(),
       (threadblock_tile_offset.k() + 1) * params.gemm_k_size);
+    // remaining iteration size
+    int iteration_size_k = min(params.problem_size.k(), Mma::Shape::kM + 2 * params.window_size);
 
     // Compute threadblock-scoped matrix multiply-add
+    // this is how many iterations we need if we start at the offset
     int gemm_k_iterations = (problem_size_k - tb_offset_A.column() + Mma::Shape::kK - 1) / Mma::Shape::kK;
-
+    // this is how many iterations (from the starting offset) is expected to be non-zero
+    int nonzero_k_iterations = (Mma::Shape::kN + params.window_size + 2 * Mma::Shape::kK - 1) / Mma::Shape::kK;
+    int end_iteration =  gemm_k_iterations - nonzero_k_iterations;
+    // int gemm_k_iterations = (iteration_size_k + Mma::Shape::kK - 1) / Mma::Shape::kK;
+    // if (!threadIdx.x)
+    //   printf("problem_size_k %d tb_offset_A.column() %d Mma::Shape::kK %d\n", problem_size_k, tb_offset_A.column(), Mma::Shape::kK);
 
     PRINT_IF
       printf("kernel::Conv::operator() threadIdx: (%d, %d, %d), problem_size_k: %d, gemm_k_iterations: %d \n",
@@ -429,7 +494,7 @@ struct Conv {
 
     if (!kSplitKSerial || gemm_k_iterations > 0) {
       // Compute threadblock-scoped matrix multiply-add
-      mma(gemm_k_iterations, accumulators, iterator_A, iterator_B, accumulators);
+      mma(gemm_k_iterations, end_iteration, accumulators, iterator_A, iterator_B, accumulators, tb_offset_C);
     }
 
     //
