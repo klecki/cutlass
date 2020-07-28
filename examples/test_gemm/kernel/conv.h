@@ -422,7 +422,7 @@ struct Conv {
     // this is how many iterations we need if we start at the offset
     int gemm_k_iterations = (problem_size_k - tb_offset_A.column() + Mma::Shape::kK - 1) / Mma::Shape::kK;
     // this is how many iterations (from the starting offset) is expected to be non-zero
-    int nonzero_k_iterations = (Mma::Shape::kN + params.window_size + 2 * Mma::Shape::kK - 1) / Mma::Shape::kK;
+    int nonzero_k_iterations = min((Mma::Shape::kN + params.window_size + 2 * Mma::Shape::kK - 1) / Mma::Shape::kK, gemm_k_iterations);
     int end_iteration =  gemm_k_iterations - nonzero_k_iterations;
     // int gemm_k_iterations = (iteration_size_k + Mma::Shape::kK - 1) / Mma::Shape::kK;
     // if (!threadIdx.x)

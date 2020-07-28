@@ -325,11 +325,6 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
   CUTLASS_HOST_DEVICE
   void get_mask(Mask &mask) { address_iterator_.get_mask(mask); }
 
-  CUTLASS_HOST_DEVICE
-  TensorCoord get_residue_offset() {
-    return address_iterator_.get_residue_offset();
-  }
-
   CUTLASS_DEVICE
   void load_with_pointer_offset(Fragment &frag, Index pointer_offset) {
     load_with_byte_offset(frag, pointer_offset * sizeof_bits<Element>::value / 8);
@@ -934,11 +929,6 @@ public:
   CUTLASS_HOST_DEVICE
   void get_mask(Mask &mask) {
     iterator_.get_mask(mask);
-  }
-
-  CUTLASS_HOST_DEVICE
-  TensorCoord get_residue_offset() {
-    return iterator_.get_residue_offset();
   }
 
   /// Loads a fragment from memory
