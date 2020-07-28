@@ -390,7 +390,8 @@ struct Conv {
     //   threadblock_tile_offset.n() * Mma::Shape::kN
     // };
 
-
+    // We need to start at aligned tile, otherwise tensor ops aren't happy.
+    // Take this into account when calculating the non-zero region
     int k_skipped_offset = max(0, threadblock_tile_offset.n() * Mma::Shape::kN - params.window_size / 2);
     k_skipped_offset = (k_skipped_offset & ~(Mma::Shape::kK - 1));
 
