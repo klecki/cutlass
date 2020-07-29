@@ -392,8 +392,9 @@ struct Conv {
 
     // We need to start at aligned tile, otherwise tensor ops aren't happy.
     // Take this into account when calculating the non-zero region
-    int k_skipped_offset = max(0, threadblock_tile_offset.n() * Mma::Shape::kN - params.window_size / 2);
+    int k_skipped_offset = max(0, threadblock_tile_offset.n() * Mma::Shape::kN - (params.window_size / 2) * params.channels);
     k_skipped_offset = (k_skipped_offset & ~(Mma::Shape::kK - 1));
+    k_skipped_offset = 0;
 
     cutlass::MatrixCoord tb_offset_A{
       threadblock_tile_offset.m() * Mma::Shape::kM,
@@ -416,8 +417,8 @@ struct Conv {
       params.problem_size.k(),
       (threadblock_tile_offset.k() + 1) * params.gemm_k_size);
     // remaining iteration size
-    int iteration_size_k = min(params.problem_size.k(), Mma::Shape::kM + 2 * params.window_size);
-
+    int iteration_size_k = min(params.problem_size.k(), Mma::Shape::kM + 2 * params.window_size * params.channels);
+    iteration_size_k = problem_size_k;
     // Compute threadblock-scoped matrix multiply-add
     // this is how many iterations we need if we start at the offset
     int gemm_k_iterations = (problem_size_k - tb_offset_A.column() + Mma::Shape::kK - 1) / Mma::Shape::kK;
