@@ -84,10 +84,11 @@ using B_type = cutlass::half_t;
 using C_type = cutlass::half_t;
 
 /// Define a CUTLASS GEMM template and launch a GEMM kernel.
+template <bool InnerConv>
 cudaError_t CutlassSgemmNN(
-  int M,
-  int N,
-  int K,
+  int height,
+  int width,
+  int channels,
   int window_size,
   A_type alpha,
   A_type const *A,
@@ -96,6 +97,7 @@ cudaError_t CutlassSgemmNN(
   C_type beta,
   C_type *C,
   int ldc) {
+  constexpr bool kInnerConv = InnerConv;
 
   // Define type definition for single-precision CUTLASS GEMM with column-major
   // input matrices and 128x128x8 threadblock tile size (chosen by default).
@@ -132,19 +134,20 @@ cudaError_t CutlassSgemmNN(
   // !!!! WE NEED THIS SO IT CAN ACTUALLY RUN ON Tensor Cores, the default is different
   using ShapeMMAOp = cutlass::gemm::GemmShape<8, 8, 4>;  // <- MMA Op tile M = 8, N = 8, K = 4
 
-  using CutlassConv = cutlass::gemm::device::Conv<A_type,        // Data-type of A matrix
+
+  using CutlassConv = typename cutlass::gemm::device::Conv<A_type,        // Data-type of A matrix
                                                   RowMajor,  // Layout of A matrix
                                                   B_type,        // Data-type of B matrix
                                                   C_type,        // Data-type of C matrix
-                                                  RowMajor, 2, true>; // Layout of C matrix
+                                                  RowMajor, 2, kInnerConv>; // Layout of C matrix
 
 
-  // using CutlassConv = cutlass::gemm::device::Conv<A_type,        // Data-type of A matrix
+  // using CutlassConv = typename cutlass::gemm::device::Conv<A_type,        // Data-type of A matrix
   //                                                 RowMajor,  // Layout of A matrix
   //                                                 B_type,        // Data-type of B matrix
   //                                                 C_type,        // Data-type of C matrix
   //                                                 RowMajor,    // Layout of C matrix
-  //                                                 2, true, // axes, InnerConv
+  //                                                 2, kInnerConv, // axes, InnerConv
   //                                                 C_type,  // element acumulator
   //                                                 MMAOp, // tensor op
   //                                                 SmArch, // arch 70
@@ -168,17 +171,17 @@ cudaError_t CutlassSgemmNN(
 
   // TODO(klecki): The cutlass::Array doesn't have an aggregate constructor :C
   cutlass::Array<int, 2> size;
-  size[0] = M;
-  size[1] = N;
+  size[0] = height;
+  size[1] = width;
   cutlass::Array<int, 2> window_sizes;
   cutlass::Array<B_type *, 2> windows;
   for (int i = 0; i < 2; i++) {
     window_sizes[i] = window_size;
     windows[i] = const_cast<B_type*>(window); // TODO(klecki): passing non-const value, cause CUTLASS is using non-const refs due to RW iterators (even when only reading)
   }
-  CutlassConv::Arguments args(size,  // Input matrix dimensions
+  typename CutlassConv::Arguments args(size,  // Input matrix dimensions
                               window_sizes, // Window sizes
-                              1, // channels count (innermost)
+                              channels, // channels count (innermost)
                               {A, lda},    // Tensor-ref for source matrix A
                               windows,    // Pointers to windows
                               {C, ldc},    // Tensor-ref for source matrix C
@@ -217,26 +220,29 @@ __global__ void InitializeMatrix_kernel(
   int ldm,
   int rows,
   int columns,
+  int channels,
   int seed = 0) {
 
   int row = threadIdx.x + blockIdx.x * blockDim.x;
   int col = threadIdx.y + blockIdx.y * blockDim.y;
 
-  if (row < rows && col < columns) {
-    int offset = row * ldm + col;
+  for (int c = 0; c < channels; c++) {
+    if (row < rows && col < columns) {
+      int offset = row * ldm + col * channels + c;
 
-    // Generate arbitrary elements.
-    // int const k = 16807;
-    // int const m = 16;
-    // T value = T(((offset + seed) * k % m) - m / 2); // TODO modulo something
-    // T value = row * 100 + col;
+      // Generate arbitrary elements.
+      // int const k = 16807;
+      // int const m = 16;
+      // T value = T(((offset + seed) * k % m) - m / 2); // TODO modulo something
+      // T value = row * 100 + col;
 
-    T value = static_cast<T>(0.f);
-    if (row == col)
-      value =  static_cast<T>(1.f);
+      T value = static_cast<T>(0.f);
+      if (row == col * channels + c)
+        value = static_cast<T>(1);
 
-    matrix[offset] = value;
+      matrix[offset] = value;
 
+    }
   }
 }
 
@@ -304,7 +310,7 @@ __global__ void InitializeMatrix_kernel_col_invariant(
 
 /// Simple function to initialize a matrix to arbitrary small integers.
 template <typename T>
-cudaError_t InitializeMatrix(T *matrix, int ldm, int rows, int columns, int seed = 0) {
+cudaError_t InitializeMatrix(T *matrix, int ldm, int rows, int columns, int channels, int seed = 0) {
 
   dim3 block(16, 16);
   dim3 grid(
@@ -312,7 +318,7 @@ cudaError_t InitializeMatrix(T *matrix, int ldm, int rows, int columns, int seed
     (columns + block.y - 1) / block.y
   );
 
-  InitializeMatrix_kernel<<< grid, block >>>(matrix, ldm, rows, columns, seed);
+  InitializeMatrix_kernel<<< grid, block >>>(matrix, ldm, rows, columns, channels, seed);
 
   return cudaGetLastError();
 }
@@ -334,7 +340,7 @@ cudaError_t InitializeMatrixColInvariant(T *matrix, int ldm, int rows, int colum
 
 /// Allocates device memory for a matrix then fills with arbitrary small integers.
 template <typename T>
-cudaError_t AllocateMatrix(T **matrix, int ldm, int rows, int columns, int seed = 0, bool col_invariant = false) {
+cudaError_t AllocateMatrix(T **matrix, int ldm, int rows, int columns, int channels, int seed = 0, bool col_invariant = false) {
   cudaError_t result;
 
   size_t sizeof_matrix = sizeof(T) * ldm * rows;
@@ -362,7 +368,7 @@ cudaError_t AllocateMatrix(T **matrix, int ldm, int rows, int columns, int seed 
     result = InitializeMatrixColInvariant(*matrix, ldm, rows, columns, seed);
   }
   else {
-    result = InitializeMatrix(*matrix, ldm, rows, columns, seed);
+    result = InitializeMatrix(*matrix, ldm, rows, columns, channels, seed);
   }
 
 
@@ -463,8 +469,9 @@ std::enable_if_t<std::is_integral<T>::value, T> idx_reflect_101(T idx, T size) {
 
 /// Naive reference Conv computation.
 __global__ void ReferenceConv_kernel_inner(
-  int M, // rows
-  int N, // cols
+  int height, // rows
+  int width, // cols
+  int channels,
   int radius,
   A_type alpha,
   A_type const *A,
@@ -477,14 +484,16 @@ __global__ void ReferenceConv_kernel_inner(
   int row = threadIdx.x + blockIdx.x * blockDim.x;
   int col = threadIdx.y + blockIdx.y * blockDim.y;
 
-  if (row < M && col < N) {
-    C_type accumulator = static_cast<C_type>(0);
+  for (int c = 0; c < channels; c++) {
+    if (row < height && col < width) {
+      C_type accumulator = static_cast<C_type>(0);
 
-    for (int k = -radius; k <= radius; ++k) {
-      accumulator += A[row * lda + idx_reflect_101(col + k, N)] * window[k];
+      for (int k = -radius; k <= radius; ++k) {
+        accumulator += A[row * lda + idx_reflect_101(col + k, width) * channels + c] * window[k];
+      }
+
+      C[row * ldc + col * channels + c] = alpha * accumulator + beta * C[row * ldc + col * channels + c];
     }
-
-    C[row * ldc + col] = alpha * accumulator + beta * C[row * ldc + col];
   }
 }
 
@@ -519,8 +528,9 @@ __global__ void ReferenceConv_kernel_outer(
 
 /// Reference Conv computation.
 cudaError_t ReferenceConv(
-  int M,
-  int N,
+  int height,
+  int width,
+  int channels,
   int radius,
   A_type alpha,
   A_type const *A,
@@ -532,13 +542,13 @@ cudaError_t ReferenceConv(
 
   dim3 block(16, 16);
   dim3 grid(
-    (M + block.x - 1) / block.x,
-    (N + block.y - 1) / block.y
+    (height + block.x - 1) / block.x,
+    (width + block.y - 1) / block.y
   );
   if (inner)
-    ReferenceConv_kernel_inner<<< grid, block >>>(M, N, radius, alpha, A, lda, window, beta, C, ldc);
+    ReferenceConv_kernel_inner<<< grid, block >>>(height, width, channels, radius, alpha, A, lda, window, beta, C, ldc);
   else
-    ReferenceConv_kernel_outer<<< grid, block >>>(M, N, radius, alpha, A, lda, window, beta, C, ldc);
+    ReferenceConv_kernel_outer<<< grid, block >>>(height, width, radius, alpha, A, lda, window, beta, C, ldc);
 
 
   return cudaGetLastError();
@@ -556,7 +566,7 @@ void print_mat(int rows, int cols, const std::vector<T> &mat, int max_rows = -1,
   for (int r = 0; r < max_rows; r++) {
     std::cout << "{";
     for (int c = 0; c < max_cols; c++) {
-      std::cout << (float)mat[r * cols + c] << ", ";
+      std::cout << std::setw(3) << (float)mat[r * cols + c] << ", ";
     }
     std::cout << "}\n";
   }
@@ -565,7 +575,10 @@ void print_mat(int rows, int cols, const std::vector<T> &mat, int max_rows = -1,
 
 /// Allocate several matrices in GPU device memory and call a single-precision
 /// CUTLASS GEMM kernel.
-cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta, bool innerConv) {
+cudaError_t TestCutlassConv(int height, int width, int channels, A_type alpha, C_type beta, bool innerConv) {
+  int M = height;
+  int N = width * channels;
+  int K = innerConv ? width * channels : height;
   cudaError_t result;
 
 
@@ -577,18 +590,16 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta, bool
   //
 
   // Compute leading dimensions for each matrix.
-  int lda = K;
-  int ldb = N;
-  int ldc = N;
+  int lda = width * channels;
+  int ldb = innerConv ? width * channels : height; // K
+  int ldc = lda;
 
   // Compute size in bytes of the C matrix.
-  size_t sizeof_A = sizeof(A_type) * lda * M;
-  size_t sizeof_B = sizeof(B_type) * ldb * K;
-  size_t sizeof_C = sizeof(C_type) * ldc * M;
+  size_t sizeof_A = sizeof(A_type) * height * width * channels;
+  size_t sizeof_C = sizeof(C_type) * height * width * channels;
 
   // Define pointers to matrices in GPU device memory.
   A_type *A;
-  B_type *B;
   C_type *C_cutlass;
   C_type *C_reference;
 
@@ -596,7 +607,7 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta, bool
   // Allocate matrices in GPU device memory with arbitrary seeds.
   //
 
-  result = AllocateMatrix(&A, lda, M, K, 0);
+  result = AllocateMatrix(&A, lda, height, width, channels, 0);
 
   B_type *window;
   B_type *window_processed;
@@ -619,8 +630,8 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta, bool
   std::vector<B_type> window_host_transformed(max_window, static_cast<B_type>(0));
   for (int i = 0; i <= radius; i++) {
     // btw, this is symmetric so widnow_center[-i] = window_center[+i]
-    window_host_transformed[256 + i] = window_host[radius - i];
-    window_host_transformed[256 - i] = window_host[radius + i];
+    window_host_transformed[256 + channels * i] = window_host[radius - i];
+    window_host_transformed[256 - channels * i] = window_host[radius + i];
   }
   // for (int i = 0; i < 1024; i++) {
   //   std::cout << i << ": " << static_cast<float>(window_host_transformed[i]) << std::endl;
@@ -636,26 +647,22 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta, bool
     return result;
   }
 
-  result = AllocateMatrix(&B, ldb, K, N, 17, true);
-
   if (result !=  cudaSuccess) {
     cudaFree(A);
     return result;
   }
 
-  result = AllocateMatrix(&C_cutlass, ldc, M, N, 101);
+  result = AllocateMatrix(&C_cutlass, ldc, height, width, channels, 101);
 
   if (result != cudaSuccess) {
     cudaFree(A);
-    cudaFree(B);
     return result;
   }
 
-  result = AllocateMatrix(&C_reference, ldc, M, N, 101);
+  result = AllocateMatrix(&C_reference, ldc, height, width, channels, 101);
 
   if (result != cudaSuccess) {
     cudaFree(A);
-    cudaFree(B);
     cudaFree(C_cutlass);
     return result;
   }
@@ -668,7 +675,6 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta, bool
 
     cudaFree(C_reference);
     cudaFree(C_cutlass);
-    cudaFree(B);
     cudaFree(A);
 
     return result;
@@ -678,7 +684,7 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta, bool
   // Launch CUTLASS GEMM.
   //
 
-  result = CutlassSgemmNN(M, N, K, window_size, alpha, A, lda, window_processed, beta, C_cutlass, ldc);
+  result = CutlassSgemmNN<true>(height, width, channels, window_size, alpha, A, lda, window_processed, beta, C_cutlass, ldc);
 
   if (result != cudaSuccess) {
     std::cerr << "CUTLASS GEMM kernel failed: "
@@ -686,7 +692,6 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta, bool
 
     cudaFree(C_reference);
     cudaFree(C_cutlass);
-    cudaFree(B);
     cudaFree(A);
 
     return result;
@@ -697,8 +702,7 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta, bool
   //
 
   // Launch reference GEMM
-  // result = ReferenceGemm(M, N, K, alpha, A, lda, B, ldb, beta, C_reference, ldc);
-  result = ReferenceConv(M, N, radius, alpha, A, lda, window + radius, beta, C_reference, ldc, innerConv);
+  result = ReferenceConv(height, width, channels, radius, alpha, A, lda, window + radius, beta, C_reference, ldc, innerConv);
 
   if (result != cudaSuccess) {
     std::cerr << "Reference GEMM kernel failed: "
@@ -706,7 +710,6 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta, bool
 
     cudaFree(C_reference);
     cudaFree(C_cutlass);
-    cudaFree(B);
     cudaFree(A);
 
     return result;
@@ -719,7 +722,6 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta, bool
   std::vector<C_type> host_reference(ldc * M);
 
   result = cudaMemcpy(host_a.data(), A, sizeof_A, cudaMemcpyDeviceToHost);
-  result = cudaMemcpy(host_b.data(), B, sizeof_B, cudaMemcpyDeviceToHost);
   result = cudaMemcpy(host_cutlass.data(), C_cutlass, sizeof_C, cudaMemcpyDeviceToHost);
 
   if (result != cudaSuccess) {
@@ -728,7 +730,6 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta, bool
 
     cudaFree(C_reference);
     cudaFree(C_cutlass);
-    cudaFree(B);
     cudaFree(A);
 
     return result;
@@ -742,7 +743,6 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta, bool
 
     cudaFree(C_reference);
     cudaFree(C_cutlass);
-    cudaFree(B);
     cudaFree(A);
 
     return result;
@@ -754,7 +754,6 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta, bool
 
   cudaFree(C_reference);
   cudaFree(C_cutlass);
-  cudaFree(B);
   cudaFree(A);
 
   //
@@ -765,8 +764,6 @@ cudaError_t TestCutlassConv(int M, int N, int K, A_type alpha, C_type beta, bool
     // dbg(host_cutlass);
     std::cout << "CUTLASS A" << std::endl;
     print_mat(M, K, host_a);
-    // std::cout << "CUTLASS B" << std::endl;
-    // print_mat(K, N, host_b);
 
     std::cout << "CUTLASS reference" << std::endl;
     print_mat(M, N, host_reference);
@@ -827,9 +824,9 @@ int main(int argc, const char *arg[]) {
   //
 
   cudaError_t result = TestCutlassConv(
-    problem[0],     // GEMM M dimension
-    problem[1],     // GEMM N dimension
-    problem[2],     // GEMM K dimension
+    problem[0],     // GEMM M dimension - height
+    problem[1],     // GEMM N dimension - width
+    3,
     scalars[0],     // alpha
     scalars[1],     // beta
     true // inner conv

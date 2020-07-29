@@ -443,13 +443,13 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
           int diag_dist = major_coord - minor_coord; // distance from diagonal - coordinate (x, x), negative are above
           // this is the starting element of the window, for inner-conv vector load goes in negative order
           int window_element = diag_dist;
-          int radius = window_size_ / 2;
+          int radius = (window_size_ / 2) * channels_;
           // element is used if it's our channel (we're multiple of `channels_` from diagonal)
           // and we still fit in the window
           // TODO(klecki): is_used needs to be checked as if-any in AccessSize
           int farthest_window = window_element < 0 ? window_element + AccessSize - 1 : window_element - AccessSize + 1;
-          bool is_used = (::abs(farthest_window) <= radius) &&
-              (kInnerConv ? (window_element * channels_ == diag_dist) : true) && address_iterator_.valid();
+          bool is_used = (::abs(farthest_window) <= radius) && true;
+              // (kInnerConv ? (window_element == diag_dist) : true) && address_iterator_.valid();
           assert(kInnerConv); // for inner conv, we reverse the windows, as the indices are row-decreasing
           if (is_used) {
             // Deal with alignment issues
@@ -457,8 +457,8 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
             load_vec<true>(dst, window_element);
 
             // Border handling:
-            int dist_up = -major_coord;
-            int dist_down = major_extent - 1 - major_coord;
+            int dist_up = (major_coord / channels_) * channels_;
+            int dist_down = ((major_extent - 1 - major_coord) / channels_) * channels_;
             // add all negative coordinates, pattern is twice the dist up, twice the dist down.
             // we need to have those checks for ANY element in the range
             // TODO(klecki): for now only for the InnerConv - contiguous-coord decreasing
@@ -469,16 +469,16 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
             // int neg_compensation = kInnerConv ? 0 : AccessSize - 1;
             int pos_compensation = kInnerConv ? -AccessSize + 1 : 0;
             while (true) {
-              neg_element += 2 * dist_up;
+              neg_element -= 2 * dist_up;
               if (-neg_element <= radius) {
-                if (dist_up != 0)
+                if (dist_up >= channels_)
                   load_vec<false>(dst, neg_element);
               } else {
                 break;
               }
               neg_element -= 2 * dist_down;
               if (-neg_element <= radius) {
-                if (dist_down != 0)
+                if (dist_down >= channels_)
                   load_vec<false>(dst, neg_element);
               } else {
                 break;
@@ -486,17 +486,18 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
             }
             // add all positive coordinates
             int pos_element = window_element;
+            // twice the dist down, twice the dist up
             while (true) {
               pos_element += 2 * dist_down;
               if (pos_element + pos_compensation <= radius) {
-                if (dist_down != 0)
+                if (dist_down >= channels_)
                   load_vec<false>(dst, pos_element);
               } else {
                 break;
               }
-              pos_element -= 2 * dist_up;
+              pos_element += 2 * dist_up;
               if (pos_element + pos_compensation <= radius) {
-                if (dist_up != 0)
+                if (dist_up >= channels_)
                   load_vec<false>(dst, pos_element);
               } else {
                 break;
