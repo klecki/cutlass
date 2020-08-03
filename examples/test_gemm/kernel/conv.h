@@ -377,24 +377,16 @@ struct Conv {
       threadblock_tile_offset.n() * Mma::Shape::kN
     };
 
-    // TODO(klecki): adding skip offset to iterators offset is a bit buggy now
-    int skip = count_skip_before(tb_offset_C, 7, {0, 0});
+    // effective span of the window in the generated matrix
+    int radius_span = (params.window_size / 2) * params.channels;
+    int window_span = params.window_size * params.channels;
 
-    // cutlass::MatrixCoord tb_offset_A{
-    //   threadblock_tile_offset.m() * Mma::Shape::kM,
-    //   threadblock_tile_offset.k() * params.gemm_k_size, // 0 * K_SIZE
-    // };
-
-    // cutlass::MatrixCoord tb_offset_B{
-    //   threadblock_tile_offset.k() * params.gemm_k_size,
-    //   threadblock_tile_offset.n() * Mma::Shape::kN
-    // };
 
     // We need to start at aligned tile, otherwise tensor ops aren't happy.
     // Take this into account when calculating the non-zero region
-    int k_skipped_offset = max(0, threadblock_tile_offset.n() * Mma::Shape::kN - (params.window_size / 2) * params.channels);
+    int k_skipped_offset = max(0, threadblock_tile_offset.n() * Mma::Shape::kN - radius_span);
     k_skipped_offset = (k_skipped_offset & ~(Mma::Shape::kK - 1));
-    k_skipped_offset = 0;
+    // k_skipped_offset = 0;
 
     cutlass::MatrixCoord tb_offset_A{
       threadblock_tile_offset.m() * Mma::Shape::kM,
@@ -416,15 +408,13 @@ struct Conv {
     int problem_size_k = min(
       params.problem_size.k(),
       (threadblock_tile_offset.k() + 1) * params.gemm_k_size);
-    // remaining iteration size
-    int iteration_size_k = min(params.problem_size.k(), Mma::Shape::kM + 2 * params.window_size * params.channels);
-    iteration_size_k = problem_size_k;
     // Compute threadblock-scoped matrix multiply-add
     // this is how many iterations we need if we start at the offset
     int gemm_k_iterations = (problem_size_k - tb_offset_A.column() + Mma::Shape::kK - 1) / Mma::Shape::kK;
     // this is how many iterations (from the starting offset) is expected to be non-zero
-    int nonzero_k_iterations = min((Mma::Shape::kN + params.window_size + 2 * Mma::Shape::kK - 1) / Mma::Shape::kK, gemm_k_iterations);
+    int nonzero_k_iterations = min((Mma::Shape::kN + window_span + 2 * Mma::Shape::kK - 1) / Mma::Shape::kK, gemm_k_iterations);
     int end_iteration =  gemm_k_iterations - nonzero_k_iterations;
+    // end_iteration = 0;
     // int gemm_k_iterations = (iteration_size_k + Mma::Shape::kK - 1) / Mma::Shape::kK;
     // if (!threadIdx.x)
     //   printf("problem_size_k %d tb_offset_A.column() %d Mma::Shape::kK %d\n", problem_size_k, tb_offset_A.column(), Mma::Shape::kK);
