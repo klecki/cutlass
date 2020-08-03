@@ -346,18 +346,27 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
   }
 
   CUTLASS_DEVICE
-  void mux_add(AccessType &dst, const AccessType &lo, const AccessType &hi, int offset) {
+  void mux_add(AccessType &dst, const AccessType &lo, const AccessType &hi, int offset, bool mask_first = false) {
     // offset is limited to 0..AccessSize
     offset = ::max(0, ::min(offset, AccessSize));
+    int start_first = 0;
+    int start_second = AccessSize - offset;
+    if (mask_first) {
+      start_first = 1;
+      // we go directly to second loop
+      if (offset == AccessSize) {
+        start_second = AccessSize - offset + 1;
+      }
+    }
     #pragma unroll
-    for (int i = 0; i < AccessSize - offset; i++) {
+    for (int i = start_first; i < AccessSize - offset; i++) {
       // TODO(klecki) there is an issue with half, that prohibits me from doing:
       // dst[i] += static_cast<Element>(lo[i + offset]);
       Element tmp = static_cast<Element>(dst[i]) + static_cast<Element>(lo[i + offset]);
       dst[i] = tmp;
     }
     #pragma unroll
-    for (int i = AccessSize - offset; i < AccessSize; i++) {
+    for (int i = start_second; i < AccessSize; i++) {
       Element tmp = static_cast<Element>(dst[i]) + static_cast<Element>(hi[i - AccessSize + offset]);
       dst[i] = tmp;
     }
@@ -395,6 +404,19 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
       mux(dst, access_ptr[0], access_ptr[1], offset);
     } else {
       mux_add(dst, access_ptr[0], access_ptr[1], offset);
+    }
+  }
+
+  template <bool init>
+  CUTLASS_DEVICE
+  void load_vec(AccessType &dst, int window_element, int dist_up) {
+    int lo_offset = get_lo_offset(window_element);
+    int offset = get_offset(window_element, lo_offset);
+    const auto *access_ptr = reinterpret_cast<AccessType const *>(pointer_ + 256 + lo_offset);
+    if (init) {
+      mux(dst, access_ptr[0], access_ptr[1], offset);
+    } else {
+      mux_add(dst, access_ptr[0], access_ptr[1], offset, dist_up == 0);
     }
   }
 
@@ -444,7 +466,7 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
             // we generate matrix by placing windows horizontally and there is no channel-based spacing
             major_coord = current_coord.contiguous(); // col
             minor_coord = current_coord.strided(); // row
-            major_extent = address_iterator_.get_extent().strided();
+            major_extent = address_iterator_.get_extent().contiguous();
           }
           // for lhs operand, the problem is transposed and the channel computation can be skipped
           // distance from diagonal in major coordinate direction
@@ -456,9 +478,8 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
           // and we still fit in the window
           // TODO(klecki): is_used needs to be checked as if-any in AccessSize
           int farthest_window = window_element < 0 ? window_element + AccessSize - 1 : window_element - AccessSize + 1;
-          bool is_used = (::abs(farthest_window) <= radius) && true;
+          bool is_used = (::abs(farthest_window) <= radius) && address_iterator_.valid();
               // (kInnerConv ? (window_element == diag_dist) : true) && address_iterator_.valid();
-          assert(kInnerConv); // for inner conv, we reverse the windows, as the indices are row-decreasing
           if (is_used) {
             // Deal with alignment issues
             AccessType dst;
@@ -468,6 +489,7 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
             // so it is not repeated by every addition - effectivelly we would change the channel)
             int dist_up = (major_coord / Channels()) * Channels();
             int dist_down = ((major_extent - 1 - major_coord) / Channels()) * Channels();
+            printf("dist_up %d dist_down %d major_extent %d major_coord %d minor_coord %d \n", dist_up, dist_down, major_extent, major_coord, minor_coord);
             // add all negative coordinates, pattern is twice the dist up, twice the dist down.
             // we need to have those checks for ANY element in the range
             // TODO(klecki): for now only for the InnerConv - contiguous-coord decreasing
@@ -477,16 +499,19 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
             int neg_element = window_element;
             // int neg_compensation = kInnerConv ? 0 : AccessSize - 1;
             int pos_compensation = kInnerConv ? -AccessSize + 1 : 0;
+            int neg_compensation = kInnerConv ? 0 : AccessSize - 1;
             while (true) {
               neg_element -= 2 * dist_up;
-              if (-neg_element <= radius) {
-                if (dist_up >= Channels())
+              if (-neg_element - neg_compensation <= radius) {
+                if (kInnerConv && dist_up >= Channels())
                   load_vec<false>(dst, neg_element);
+                else
+                  load_vec<false>(dst, neg_element, dist_up);
               } else {
                 break;
               }
               neg_element -= 2 * dist_down;
-              if (-neg_element <= radius) {
+              if (-neg_element - neg_compensation <= radius) {
                 if (dist_down >= Channels())
                   load_vec<false>(dst, neg_element);
               } else {
