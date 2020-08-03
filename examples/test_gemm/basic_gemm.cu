@@ -500,8 +500,9 @@ __global__ void ReferenceConv_kernel_inner(
 
 /// Naive reference Conv computation.
 __global__ void ReferenceConv_kernel_outer(
-  int M, // rows
-  int N, // cols
+  int height, // rows
+  int width, // cols
+  int channels,
   int radius,
   A_type alpha,
   A_type const *A,
@@ -514,11 +515,11 @@ __global__ void ReferenceConv_kernel_outer(
   int row = threadIdx.x + blockIdx.x * blockDim.x;
   int col = threadIdx.y + blockIdx.y * blockDim.y;
 
-  if (row < M && col < N) {
+  if (row < height && col < width * channels) {
     C_type accumulator = static_cast<C_type>(0);
 
     for (int k = -radius; k <= radius; ++k) {
-      accumulator += A[idx_reflect_101(row + k, M) * lda + col] * window[k];
+      accumulator += A[idx_reflect_101(row + k, height) * lda + col] * window[k];
     }
 
     C[row * ldc + col] = alpha * accumulator + beta * C[row * ldc + col];
@@ -541,14 +542,15 @@ cudaError_t ReferenceConv(
   int ldc, bool inner) {
 
   dim3 block(16, 16);
+  int working_width = inner ? width : width * channels;
   dim3 grid(
     (height + block.x - 1) / block.x,
-    (width + block.y - 1) / block.y
+    (working_width + block.y - 1) / block.y
   );
   if (inner)
     ReferenceConv_kernel_inner<<< grid, block >>>(height, width, channels, radius, alpha, A, lda, window, beta, C, ldc);
   else
-    ReferenceConv_kernel_outer<<< grid, block >>>(height, width, radius, alpha, A, lda, window, beta, C, ldc);
+    ReferenceConv_kernel_outer<<< grid, block >>>(height, width, channels, radius, alpha, A, lda, window, beta, C, ldc);
 
 
   return cudaGetLastError();
@@ -630,8 +632,13 @@ cudaError_t TestCutlassConv(int height, int width, int channels, A_type alpha, C
   std::vector<B_type> window_host_transformed(max_window, static_cast<B_type>(0));
   for (int i = 0; i <= radius; i++) {
     // btw, this is symmetric so widnow_center[-i] = window_center[+i]
-    window_host_transformed[256 + channels * i] = window_host[radius - i];
-    window_host_transformed[256 - channels * i] = window_host[radius + i];
+    if (innerConv) {
+      window_host_transformed[256 + channels * i] = window_host[radius - i];
+      window_host_transformed[256 - channels * i] = window_host[radius + i];
+    } else {
+      window_host_transformed[256 - i] = window_host[radius - i];
+      window_host_transformed[256 + i] = window_host[radius + i];
+    }
   }
   // for (int i = 0; i < 1024; i++) {
   //   std::cout << i << ": " << static_cast<float>(window_host_transformed[i]) << std::endl;
@@ -684,7 +691,7 @@ cudaError_t TestCutlassConv(int height, int width, int channels, A_type alpha, C
   // Launch CUTLASS GEMM.
   //
 
-  result = CutlassSgemmNN<true>(height, width, channels, window_size, alpha, A, lda, window_processed, beta, C_cutlass, ldc);
+  result = CutlassSgemmNN<false>(height, width, channels, window_size, alpha, A, lda, window_processed, beta, C_cutlass, ldc);
 
   if (result != cudaSuccess) {
     std::cerr << "CUTLASS GEMM kernel failed: "
@@ -829,7 +836,7 @@ int main(int argc, const char *arg[]) {
     3,
     scalars[0],     // alpha
     scalars[1],     // beta
-    true // inner conv
+    false // outer conv
   );
 
   if (result == cudaSuccess) {

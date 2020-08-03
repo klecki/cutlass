@@ -399,6 +399,14 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
   }
 
   CUTLASS_DEVICE
+  int Channels() {
+    if (kInnerConv) {
+      return channels_;
+    }
+    return 1;
+  }
+
+  CUTLASS_DEVICE
   void load_with_byte_offset(Fragment &frag, LongIndex byte_offset) {
     PRINT_IF
       printf("LOAD: kStrided: %d, kContiguous: %d, kAccessesPerVector: %d\n", ThreadMap::Iterations::kStrided, ThreadMap::Iterations::kContiguous, kAccessesPerVector);
@@ -443,7 +451,7 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
           int diag_dist = major_coord - minor_coord; // distance from diagonal - coordinate (x, x), negative are above
           // this is the starting element of the window, for inner-conv vector load goes in negative order
           int window_element = diag_dist;
-          int radius = (window_size_ / 2) * channels_;
+          int radius = (window_size_ / 2) * Channels();
           // element is used if it's our channel (we're multiple of `channels_` from diagonal)
           // and we still fit in the window
           // TODO(klecki): is_used needs to be checked as if-any in AccessSize
@@ -456,9 +464,10 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
             AccessType dst;
             load_vec<true>(dst, window_element);
 
-            // Border handling:
-            int dist_up = (major_coord / channels_) * channels_;
-            int dist_down = ((major_extent - 1 - major_coord) / channels_) * channels_;
+            // Border handling, eliminate the remainder (channel offset from the position calculation,
+            // so it is not repeated by every addition - effectivelly we would change the channel)
+            int dist_up = (major_coord / Channels()) * Channels();
+            int dist_down = ((major_extent - 1 - major_coord) / Channels()) * Channels();
             // add all negative coordinates, pattern is twice the dist up, twice the dist down.
             // we need to have those checks for ANY element in the range
             // TODO(klecki): for now only for the InnerConv - contiguous-coord decreasing
@@ -471,14 +480,14 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
             while (true) {
               neg_element -= 2 * dist_up;
               if (-neg_element <= radius) {
-                if (dist_up >= channels_)
+                if (dist_up >= Channels())
                   load_vec<false>(dst, neg_element);
               } else {
                 break;
               }
               neg_element -= 2 * dist_down;
               if (-neg_element <= radius) {
-                if (dist_down >= channels_)
+                if (dist_down >= Channels())
                   load_vec<false>(dst, neg_element);
               } else {
                 break;
@@ -490,14 +499,14 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
             while (true) {
               pos_element += 2 * dist_down;
               if (pos_element + pos_compensation <= radius) {
-                if (dist_down >= channels_)
+                if (dist_down >= Channels())
                   load_vec<false>(dst, pos_element);
               } else {
                 break;
               }
               pos_element += 2 * dist_up;
               if (pos_element + pos_compensation <= radius) {
-                if (dist_up >= channels_)
+                if (dist_up >= Channels())
                   load_vec<false>(dst, pos_element);
               } else {
                 break;
