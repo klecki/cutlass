@@ -127,6 +127,124 @@ namespace threadblock {
 //
 //   kernel<Iterator>(params, view.data());
 // }
+//
+//
+// This iterator is responsible for generating matrix used for computing convolution
+// of inner or outer axis with provided kernel window. Matrix is generated on the fly
+// from a window stored in shared memory (should also work with global memory).
+// Let's call this a "kernel matrix".
+//
+// N.B. matrix used to apply convolution can be generated ahead of time by doing convolution
+// with identity matrix.
+//
+// For inner convolution, we need to handle channels. For simplicity, first let's consider
+// case where channels = 1, let's take window_size = 5 and disregard the border handling.
+// We want to convolve gray image, HWC along 'W' axis. For this we multiply the image
+// from the right by following matrix, placing the convolution window in columns.
+// (Note that the window center is always on the diagonal of the matrix):
+//
+//  0, -1, -2,  x,  x,  x,  x,  x,
+//  1,  0, -1, -2,  x,  x,  x,  x,
+//  2,  1,  0, -1, -2,  x,  x,  x,
+//  x,  2,  1,  0, -1, -2,  x,  x,
+//  x,  x,  2,  1,  0, -1, -2,  x,
+//  x,  x,  x,  2,  1,  0, -1, -2,
+//  x,  x,  x,  x,  2,  1,  0, -1,
+//  x,  x,  x,  x,  x,  2,  1,  0,
+//
+// where number stands for particular kernel window element, and x for actual 0 value
+// Now, let's consider border handling as "repeat 101". If we extended both image and
+// the generated matrix by the border elements, we would get:
+//
+// -2,  x,  x,  x,  x,  x,  x,  x   // -2
+// -1, -2,  x,  x,  x,  x,  x,  x   // -1
+//  ------------------------------
+//  0, -1, -2,  x,  x,  x,  x,  x,  //  0
+//  1,  0, -1, -2,  x,  x,  x,  x,  //  1
+//  2,  1,  0, -1, -2,  x,  x,  x,  //  2
+//  x,  2,  1,  0, -1, -2,  x,  x,
+//  x,  x,  2,  1,  0, -1, -2,  x,
+//  x,  x,  x,  2,  1,  0, -1, -2,
+//  x,  x,  x,  x,  2,  1,  0, -1,
+//  x,  x,  x,  x,  x,  2,  1,  0,
+//  ------------------------------
+//  x,  x,  x,  x,  x,  x,  2,  1,
+//  x,  x,  x,  x,  x,  x,  x,  2,
+//
+// Row "-2" of "kernel matrix" would multiply column "-2" of the image, which is equal to column "2"
+// of the image. By the distributive properties of multiplication. We can add the coeficients
+// of row -2 and 2 to get the same result without the need to extend the matrices,
+// thus the matrix will contain a sum of given kernel window elements in given positions:
+//
+//  0,    -1,    -2,     x,     x,     x,     x,    x,
+//  1 -1,  0 -2, -1,    -2,     x,     x,     x,    x,
+//  2 -2,  1,     0,    -1,    -2,     x,     x,    x,
+//  x,     2,     1,     0,    -1,    -2,     x,    x,
+//  x,     x,     2,     1,     0,    -1,    -2,    x,
+//  x,     x,     x,     2,     1,     0,    -1,   -2 2,
+//  x,     x,     x,     x,     2,     1,     0 2, -1 1,
+//  x,     x,     x,     x,     x,     2,     1,    0,
+//
+// To generate specific coordinate (row, col), we check how far it is from diagonal:
+// diag_dist = row - col <- negative means we're above, that number maps to the base window element
+// we need to use.
+// When handling the borders, we need to check the distance to the top and bottom of the matrix.
+// For the "top" border, we would use elements that are twice the distance to the top from
+// currently loaded "base element", than those that are twice the distance to the bottom,
+// and repeat the process until we go outside of the window radius. Similarly for the "bottom"
+// border.
+//
+// Examples:
+// (1, 0): diag_dist = 1   -> we load the kernel window at coordinate "1".
+// The distance to the top is equal 1 (row coordinate), so moving twice the distance up
+// gives up 1 - 2 * 1 = -1 -> we need to add the kernel window at coordinate "-1".
+// Distance to the bottom is 6, and -1 - 2 * 6 = -13 is out of our kernel window size so we stop.
+// Same when going to the bottom, 1 + 2 * 6 = 13 - also out.
+// Note that, when the distance is 0, we don't add the additional coefficients in this border mode.
+//
+// Make channel number > 1 will cause additional gaps in the kernel window when looking at the
+// columns of "kernel matrix" for example (again without border) for channels = 3,
+// part of the matrix:
+//
+//  0,  x,  x, -1,  x,  x, -2
+//  x,  0,  x,  x, -1,  x,  x
+//  x,  x,  0,  x,  x, -1,  x
+//  1,  x,  x,  0,  x,  x, -1
+//  x,  1,  x,  x,  0,  x,  x
+//  x,  x,  1,  x,  x,  0,  x
+//  2,  x,  x,  1,  x,  x,  0
+//  x,  2,  x,  x,  1,  x,  x
+//  x,  x,  2,  x,  x,  1,  x,
+//  x,  x,  x,  2,  x,  x,  1,
+//  x,  x,  x,  x,  2,  x,  x,
+//  x,  x,  x,  x,  x,  2,  x,
+//  x,  x,  x,  x,  x,  x,  2
+//
+// We need to consider a case, when we're using aligned vector loads through an AlignedArray.
+// Same principles will apply, but we can observe that the window element indexes decreese
+// along the rows. We place the kernel window in reverse in memory (with the necessary empty
+// spaces for channels) so we can utilize the vector loads:
+//
+// -2, x, x, -1, x, x, 0, x, x, 1, x, x, 2
+//
+// In case of outer convolution, the "kernel matrix" is placed on the left
+// and we can ignore the channels - it's the same matrix as for inner convolution but transposed,
+// but when used with aligned vector loads it requires a bit different masking (instead of
+// ignoring first and last row, we need to mask the first and last column).
+// The kernel window is placed in the rows, again with the centers on the diagonal.
+//
+//  0,  1,  2,  x,  x,  x,  x,  x,
+// -1,  0,  1,  2,  x,  x,  x,  x,
+// -2, -1,  0,  1,  2,  x,  x,  x,
+//  x, -2, -1,  0,  1,  2,  x,  x,
+//  x,  x, -2, -1,  0,  1,  2,  x,
+//  x,  x,  x, -2, -1,  0,  1,  2,
+//  x,  x,  x,  x, -2, -1,  0,  1,
+//  x,  x,  x,  x,  x, -2, -1,  0,
+//
+// Additionally when using vector loads with border handling for the outer kernel matrix,
+// we need in turns mirrored window and regular window order.
+//
 ///
 ///
 template <
@@ -183,10 +301,6 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
 
   /// Type used for internal memory accesses
   using AccessType = AlignedArray<Element, AccessSize, (AccessSize * sizeof_bits<Element>::value / 8)>;
-  // using ReadType = AlignedArray<Element, AccessSize, sizeof(Element)>;
-  using ReadType = AccessType;
-  // using ReadType = Array<Element, AccessSize>;
-  // static_assert(AccessSize == 1, "I can't access more than one element as I don't know how the coords work in that case");
 
   /// Underlying iterator to compute the addresses
   using TileAccessIterator =
@@ -194,9 +308,6 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
                                    ThreadMap, AccessType>;
 
   static int const kAccessesPerVector = TileAccessIterator::kAccessesPerVector;
-  // static int const kAccessesPerVector = Debugx<66, TileAccessIterator>::f<TileAccessIterator::kAccessesPerVector>();
-
-  // static int const x__ = Debugx<66, TileAccessIterator>::f();
 
   /// Fragment object to be loaded or stored
   using Fragment = cutlass::Array<Element, ThreadMap::Iterations::kCount *
@@ -258,10 +369,7 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
       TensorCoord const &threadblock_offset)
       : address_iterator_(params.params_, pointer, extent, thread_id,
                           threadblock_offset), pointer_(pointer), window_size_(params.window_size_),
-                          channels_(params.channels_) {
-    PRINT_IF
-      printf("PositionPredicatedTileIterator ThreadMap::Iterations::kCount: %d ThreadMap::kElementsPerAccess: %d\n", ThreadMap::Iterations::kCount, ThreadMap::kElementsPerAccess);
-  }
+                          channels_(params.channels_) {}
 
   /// Construct a PositionPredicatedTileIterator with zero threadblock offset
   CUTLASS_HOST_DEVICE
@@ -346,27 +454,18 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
   }
 
   CUTLASS_DEVICE
-  void mux_add(AccessType &dst, const AccessType &lo, const AccessType &hi, int offset, bool mask_first = false) {
+  void mux_add(AccessType &dst, const AccessType &lo, const AccessType &hi, int offset) {
     // offset is limited to 0..AccessSize
     offset = ::max(0, ::min(offset, AccessSize));
-    int start_first = 0;
-    int start_second = AccessSize - offset;
-    if (mask_first) {
-      start_first = 1;
-      // we go directly to second loop
-      if (offset == AccessSize) {
-        start_second = AccessSize - offset + 1;
-      }
-    }
     #pragma unroll
-    for (int i = start_first; i < AccessSize - offset; i++) {
+    for (int i = 0; i < AccessSize - offset; i++) {
       // TODO(klecki) there is an issue with half, that prohibits me from doing:
       // dst[i] += static_cast<Element>(lo[i + offset]);
       Element tmp = static_cast<Element>(dst[i]) + static_cast<Element>(lo[i + offset]);
       dst[i] = tmp;
     }
     #pragma unroll
-    for (int i = start_second; i < AccessSize; i++) {
+    for (int i = AccessSize - offset; i < AccessSize; i++) {
       Element tmp = static_cast<Element>(dst[i]) + static_cast<Element>(hi[i - AccessSize + offset]);
       dst[i] = tmp;
     }
