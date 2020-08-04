@@ -638,6 +638,9 @@ cudaError_t TestCutlassConv(int height, int width, int channels, A_type alpha, C
     } else {
       window_host_transformed[256 - i] = window_host[radius - i];
       window_host_transformed[256 + i] = window_host[radius + i];
+
+      window_host_transformed[512 + i] = window_host[radius - i];
+      window_host_transformed[512 - i] = window_host[radius + i];
     }
   }
   // for (int i = 0; i < 1024; i++) {

@@ -372,10 +372,11 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
     }
   }
 
+  template <bool mirrored>
   CUTLASS_DEVICE
   int get_lo_offset(int window_element) {
     // for Inner Convolution the window is in reverse when traversing in contiguous axis
-    if (kInnerConv) {
+    if (mirrored) {
      window_element *= -1;
     }
     if (window_element >= 0) {
@@ -384,9 +385,10 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
     return ((window_element - (AccessSize - 1)) / AccessSize) * AccessSize;
   }
 
+  template <bool mirrored>
   CUTLASS_DEVICE
   int get_offset(int window_element, int lo_offset) {
-    if (kInnerConv) {
+    if (mirrored) {
       assert(lo_offset <= -window_element);
       return -window_element - lo_offset;
     }
@@ -394,12 +396,13 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
     return window_element - lo_offset;
   }
 
-  template <bool init>
+  template <bool init, bool mirrored = true>
   CUTLASS_DEVICE
   void load_vec(AccessType &dst, int window_element) {
-    int lo_offset = get_lo_offset(window_element);
-    int offset = get_offset(window_element, lo_offset);
-    const auto *access_ptr = reinterpret_cast<AccessType const *>(pointer_ + 256 + lo_offset);
+    int lo_offset = get_lo_offset<mirrored>(window_element);
+    int offset = get_offset<mirrored>(window_element, lo_offset);
+    constexpr int window_center = kInnerConv || !mirrored ? 256 : 512;
+    const auto *access_ptr = reinterpret_cast<AccessType const *>(pointer_ + window_center + lo_offset);
     if (init) {
       mux(dst, access_ptr[0], access_ptr[1], offset);
     } else {
@@ -407,16 +410,31 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
     }
   }
 
-  template <bool init>
+  template <bool init, bool mirrored>
   CUTLASS_DEVICE
-  void load_vec(AccessType &dst, int window_element, int dist_up) {
-    int lo_offset = get_lo_offset(window_element);
-    int offset = get_offset(window_element, lo_offset);
-    const auto *access_ptr = reinterpret_cast<AccessType const *>(pointer_ + 256 + lo_offset);
+  void load_vec(AccessType &dst, int window_element, bool mask_first, bool mask_last) {
+    int lo_offset = get_lo_offset<mirrored>(window_element);
+    int offset = get_offset<mirrored>(window_element, lo_offset);
+    constexpr int window_center = kInnerConv || !mirrored ? 256 : 512;
+    const auto *access_ptr = reinterpret_cast<AccessType const *>(pointer_ + window_center + lo_offset);
     if (init) {
       mux(dst, access_ptr[0], access_ptr[1], offset);
     } else {
-      mux_add(dst, access_ptr[0], access_ptr[1], offset, dist_up == 0);
+      Element tmp = static_cast<Element>(0);
+
+      if (mask_first) {
+        tmp = static_cast<Element>(dst[0]);
+      } else if (mask_last) {
+        tmp = static_cast<Element>(dst[AccessSize - 1]);
+      }
+
+      mux_add(dst, access_ptr[0], access_ptr[1], offset);
+
+      if (mask_first) {
+        dst[0] = static_cast<Element>(tmp);
+      } else if (mask_last) {
+        dst[AccessSize - 1] = static_cast<Element>(tmp);
+      }
     }
   }
 
@@ -483,13 +501,12 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
           if (is_used) {
             // Deal with alignment issues
             AccessType dst;
-            load_vec<true>(dst, window_element);
+            load_vec<true, kInnerConv>(dst, window_element);
 
             // Border handling, eliminate the remainder (channel offset from the position calculation,
             // so it is not repeated by every addition - effectivelly we would change the channel)
             int dist_up = (major_coord / Channels()) * Channels();
             int dist_down = ((major_extent - 1 - major_coord) / Channels()) * Channels();
-            printf("dist_up %d dist_down %d major_extent %d major_coord %d minor_coord %d \n", dist_up, dist_down, major_extent, major_coord, minor_coord);
             // add all negative coordinates, pattern is twice the dist up, twice the dist down.
             // we need to have those checks for ANY element in the range
             // TODO(klecki): for now only for the InnerConv - contiguous-coord decreasing
@@ -498,7 +515,7 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
             // when we are at the edge, and not the whole vectors
             int neg_element = window_element;
             // int neg_compensation = kInnerConv ? 0 : AccessSize - 1;
-            int pos_compensation = kInnerConv ? -AccessSize + 1 : 0;
+            int pos_compensation = kInnerConv ? -AccessSize + 1 : -AccessSize + 1;
             int neg_compensation = kInnerConv ? 0 : AccessSize - 1;
             while (true) {
               neg_element -= 2 * dist_up;
@@ -506,14 +523,16 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
                 if (kInnerConv && dist_up >= Channels())
                   load_vec<false>(dst, neg_element);
                 else
-                  load_vec<false>(dst, neg_element, dist_up);
+                  load_vec<false, true>(dst, neg_element, dist_up == 0, false);
               } else {
                 break;
               }
               neg_element -= 2 * dist_down;
               if (-neg_element - neg_compensation <= radius) {
-                if (dist_down >= Channels())
+                if (kInnerConv && dist_down >= Channels())
                   load_vec<false>(dst, neg_element);
+                else
+                  load_vec<false, kInnerConv>(dst, neg_element, false, dist_down == AccessSize - 1);
               } else {
                 break;
               }
@@ -524,15 +543,19 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
             while (true) {
               pos_element += 2 * dist_down;
               if (pos_element + pos_compensation <= radius) {
-                if (dist_down >= Channels())
+                if (kInnerConv && dist_down >= Channels())
                   load_vec<false>(dst, pos_element);
+                else
+                  load_vec<false, true>(dst, pos_element, false, dist_down == AccessSize - 1);
               } else {
                 break;
               }
               pos_element += 2 * dist_up;
               if (pos_element + pos_compensation <= radius) {
-                if (dist_up >= Channels())
+                if (kInnerConv && dist_up >= Channels())
                   load_vec<false>(dst, pos_element);
+                else
+                  load_vec<false, kInnerConv>(dst, pos_element, dist_up == 0, false);
               } else {
                 break;
               }
