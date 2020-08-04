@@ -78,6 +78,7 @@
 int print = 1;
 
 static constexpr int kWindowSize = 15;
+static constexpr bool kInnerConv = true;
 
 using A_type = cutlass::half_t;
 using B_type = cutlass::half_t;
@@ -694,7 +695,7 @@ cudaError_t TestCutlassConv(int height, int width, int channels, A_type alpha, C
   // Launch CUTLASS GEMM.
   //
 
-  result = CutlassSgemmNN<false>(height, width, channels, window_size, alpha, A, lda, window_processed, beta, C_cutlass, ldc);
+  result = CutlassSgemmNN<kInnerConv>(height, width, channels, window_size, alpha, A, lda, window_processed, beta, C_cutlass, ldc);
 
   if (result != cudaSuccess) {
     std::cerr << "CUTLASS GEMM kernel failed: "
@@ -839,7 +840,7 @@ int main(int argc, const char *arg[]) {
     3,
     scalars[0],     // alpha
     scalars[1],     // beta
-    false // outer conv
+    kInnerConv // outer conv
   );
 
   if (result == cudaSuccess) {

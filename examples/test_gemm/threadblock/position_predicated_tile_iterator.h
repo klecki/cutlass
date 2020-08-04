@@ -495,54 +495,96 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
     return window_element - lo_offset;
   }
 
-  template <bool init, bool mirrored = true>
+  struct aligned_offset_data {
+    int aligned_element; // aligned to multiple of AccessSize window element
+    int offset; // positive offset to original element
+  };
+
+  template <bool mirrored>
   CUTLASS_DEVICE
-  void load_vec(AccessType &dst, int window_element) {
-    int lo_offset = get_lo_offset<mirrored>(window_element);
-    int offset = get_offset<mirrored>(window_element, lo_offset);
-    constexpr int window_center = kInnerConv || !mirrored ? 256 : 512;
-    const auto *access_ptr = reinterpret_cast<AccessType const *>(pointer_ + window_center + lo_offset);
-    if (init) {
-      mux(dst, access_ptr[0], access_ptr[1], offset);
-    } else {
-      mux_add(dst, access_ptr[0], access_ptr[1], offset);
-    }
+  aligned_offset_data get_aligned_offset(int window_element) {
+    static_assert(!kInnerConv || mirrored, "All lookups are mirrored for Inner Conv.");
+    int lo_element = get_lo_offset<mirrored>(window_element);
+    int offset = get_offset<mirrored>(window_element, lo_element);
+    return {lo_element, offset};
   }
 
-  template <bool init, bool mirrored>
+  template <bool mirrored = true>
   CUTLASS_DEVICE
-  void load_vec(AccessType &dst, int window_element, bool mask_first, bool mask_last) {
+  void load_vec(AccessType &dst, int window_element) {
+    auto aligned_offset = get_aligned_offset<mirrored>(window_element);
+    constexpr int window_center = kInnerConv || !mirrored ? 256 : 512;
+    const auto *access_ptr = reinterpret_cast<AccessType const *>(pointer_ + window_center + aligned_offset.aligned_element);
+    mux(dst, access_ptr[0], access_ptr[1], aligned_offset.offset);
+  }
+
+  template <bool mirrored = true, bool InnerConv_ = kInnerConv>
+  CUTLASS_DEVICE
+  std::enable_if_t<InnerConv_> add_vec(AccessType &dst, int window_element, bool mask_first, bool mask_last) {
+    // In inner conv, we skip rows
+    if (mask_first || mask_last) {
+      return;
+    }
+    auto aligned_offset = get_aligned_offset<mirrored>(window_element);
+    constexpr int window_center = kInnerConv || !mirrored ? 256 : 512;
+    const auto *access_ptr = reinterpret_cast<AccessType const *>(pointer_ + window_center + aligned_offset.aligned_element);
+    mux_add(dst, access_ptr[0], access_ptr[1], aligned_offset.offset);
+  }
+
+  template <bool mirrored, bool InnerConv_ = kInnerConv>
+  CUTLASS_DEVICE
+  std::enable_if_t<!InnerConv_> add_vec(AccessType &dst, int window_element, bool mask_first, bool mask_last) {
+    // In outer conv we skip columns
     int lo_offset = get_lo_offset<mirrored>(window_element);
     int offset = get_offset<mirrored>(window_element, lo_offset);
     constexpr int window_center = kInnerConv || !mirrored ? 256 : 512;
     const auto *access_ptr = reinterpret_cast<AccessType const *>(pointer_ + window_center + lo_offset);
-    if (init) {
-      mux(dst, access_ptr[0], access_ptr[1], offset);
-    } else {
-      Element tmp = static_cast<Element>(0);
+    Element tmp = static_cast<Element>(0);
 
-      if (mask_first) {
-        tmp = static_cast<Element>(dst[0]);
-      } else if (mask_last) {
-        tmp = static_cast<Element>(dst[AccessSize - 1]);
-      }
+    if (mask_first) {
+      tmp = static_cast<Element>(dst[0]);
+    } else if (mask_last) {
+      tmp = static_cast<Element>(dst[AccessSize - 1]);
+    }
 
-      mux_add(dst, access_ptr[0], access_ptr[1], offset);
+    mux_add(dst, access_ptr[0], access_ptr[1], offset);
 
-      if (mask_first) {
-        dst[0] = static_cast<Element>(tmp);
-      } else if (mask_last) {
-        dst[AccessSize - 1] = static_cast<Element>(tmp);
-      }
+    if (mask_first) {
+      dst[0] = static_cast<Element>(tmp);
+    } else if (mask_last) {
+      dst[AccessSize - 1] = static_cast<Element>(tmp);
     }
   }
 
   CUTLASS_DEVICE
   int Channels() {
     if (kInnerConv) {
-      return channels_;
+      switch (channels_) {
+        case 1:
+          return 1;
+        case 3:
+          return 3;
+        case 4:
+          return 4;
+        default:
+          return channels_;
+      }
     }
     return 1;
+  }
+
+  /**
+   * @brief Check whether any of the `AccesType` elements to be loaded lies within the kernel window
+   */
+  CUTLASS_DEVICE
+  bool valid(int window_element, int radius) {
+    if (kInnerConv) {
+       // We will try to access [window_element, window_element - 1, ..., window_element - AccessSize + 1]
+       return ::abs(window_element) <= radius || ::abs(window_element - AccessSize + 1) <= radius;
+    } else {
+      // We will try to access [window_element, window_element + 1, ..., window_element + AccessSize - 1]
+      return ::abs(window_element) <= radius || ::abs(window_element + AccessSize - 1) <= radius;
+    }
   }
 
   CUTLASS_DEVICE
@@ -582,13 +624,14 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
     // element is used if it's our channel (we're multiple of `channels_` from diagonal)
     // and we still fit in the window
     // TODO(klecki): is_used needs to be checked as if-any in AccessSize
-    int farthest_window = window_element < 0 ? window_element + AccessSize - 1 : window_element - AccessSize + 1;
-    bool is_used = (::abs(farthest_window) <= radius) && address_iterator_.valid();
+    // int farthest_window = window_element < 0 ? window_element + AccessSize - 1 : window_element - AccessSize + 1;
+
+    bool is_used = valid(window_element, radius) && address_iterator_.valid();
         // (kInnerConv ? (window_element == dist_diag) : true) && address_iterator_.valid();
     if (is_used) {
       // Deal with alignment issues
       AccessType dst;
-      load_vec<true, kInnerConv>(dst, window_element);
+      load_vec<kInnerConv>(dst, window_element);
       // add all negative coordinates, pattern is twice the dist up, twice the dist down.
       // we need to have those checks for ANY element in the range
       // TODO(klecki): for now only for the InnerConv - contiguous-coord decreasing
@@ -602,19 +645,19 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
       while (true) {
         neg_element -= 2 * dist_begin;
         if (-neg_element - neg_compensation <= radius) {
-          if (kInnerConv && dist_begin >= Channels())
-            load_vec<false>(dst, neg_element);
+          if (kInnerConv)
+            add_vec<true>(dst, neg_element, dist_begin < Channels(), false);
           else
-            load_vec<false, true>(dst, neg_element, dist_begin == 0, false);
+            add_vec<true>(dst, neg_element, dist_begin == 0, false);
         } else {
           break;
         }
         neg_element -= 2 * dist_end;
         if (-neg_element - neg_compensation <= radius) {
-          if (kInnerConv && dist_end >= Channels())
-            load_vec<false>(dst, neg_element);
+          if (kInnerConv)
+            add_vec<true>(dst, neg_element, false, dist_end < Channels());
           else
-            load_vec<false, kInnerConv>(dst, neg_element, false, dist_end == AccessSize - 1);
+            add_vec<kInnerConv>(dst, neg_element, false, dist_end == AccessSize - 1);
         } else {
           break;
         }
@@ -625,19 +668,19 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
       while (true) {
         pos_element += 2 * dist_end;
         if (pos_element + pos_compensation <= radius) {
-          if (kInnerConv && dist_end >= Channels())
-            load_vec<false>(dst, pos_element);
+          if (kInnerConv)
+            add_vec<true>(dst, pos_element, false, dist_end < Channels());
           else
-            load_vec<false, true>(dst, pos_element, false, dist_end == AccessSize - 1);
+            add_vec<true>(dst, pos_element, false, dist_end == AccessSize - 1);
         } else {
           break;
         }
         pos_element += 2 * dist_begin;
         if (pos_element + pos_compensation <= radius) {
-          if (kInnerConv && dist_begin >= Channels())
-            load_vec<false>(dst, pos_element);
+          if (kInnerConv)
+            add_vec<true>(dst, pos_element, dist_begin < Channels(), false);
           else
-            load_vec<false, kInnerConv>(dst, pos_element, dist_begin == 0, false);
+            add_vec<kInnerConv>(dst, pos_element, dist_begin == 0, false);
         } else {
           break;
         }
