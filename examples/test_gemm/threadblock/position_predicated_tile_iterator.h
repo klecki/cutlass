@@ -186,7 +186,7 @@ namespace threadblock {
 //  x,     x,     x,     x,     x,     2,     1,    0,
 //
 // To generate specific coordinate (row, col), we check how far it is from diagonal:
-// diag_dist = row - col <- negative means we're above, that number maps to the base window element
+// dist_diag = row - col <- negative means we're above, that number maps to the base window element
 // we need to use.
 // When handling the borders, we need to check the distance to the top and bottom of the matrix.
 // For the "top" border, we would use elements that are twice the distance to the top from
@@ -195,7 +195,7 @@ namespace threadblock {
 // border.
 //
 // Examples:
-// (1, 0): diag_dist = 1   -> we load the kernel window at coordinate "1".
+// (1, 0): dist_diag = 1   -> we load the kernel window at coordinate "1".
 // The distance to the top is equal 1 (row coordinate), so moving twice the distance up
 // gives up 1 - 2 * 1 = -1 -> we need to add the kernel window at coordinate "-1".
 // Distance to the bottom is 6, and -1 - 2 * 6 = -13 is out of our kernel window size so we stop.
@@ -546,9 +546,112 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
   }
 
   CUTLASS_DEVICE
+  void load_access_elements(AccessType *frag_ptr, int idx) {
+
+    // This calculates the logical coordinate of the beggining of access
+    TensorCoord current_coord = address_iterator_.get_current_coord();
+
+    // Distance from diagonal in the dimension in which we place window (inner - column, outer - row)
+    int dist_diag = 0;
+    // Distance from first row/column for inner/outer convolution
+    int dist_begin = 0;
+    // Distance from last row/column for inner/outer convolution
+    int dist_end = 0;
+    if (kInnerConv) {
+      // we generate matrix by placing windows vertically, so the row is the major coordinate
+      int row = current_coord.strided(); // row
+      int col = current_coord.contiguous(); // col
+      int height = address_iterator_.get_extent().strided();
+      dist_diag = row - col; // negative above coordinate
+      // Border handling, eliminate the remainder (channel offset from the position calculation,
+      // so it is not repeated by every addition - effectively we would change the channel)
+      dist_begin = (row / Channels()) * Channels();
+      dist_end = ((height - 1 - row) / Channels()) * Channels();
+    } else {
+      // we generate matrix by placing windows horizontally and there is no channel-based spacing
+      int row = current_coord.strided(); // row
+      int col = current_coord.contiguous(); // col
+      int width = address_iterator_.get_extent().contiguous();
+      dist_diag = col - row;
+      dist_begin = col;
+      dist_end = width - 1 - col;
+    }
+    // this is the starting element of the window, for inner-conv vector load goes in negative order
+    int window_element = dist_diag;
+    int radius = (window_size_ / 2) * Channels();
+    // element is used if it's our channel (we're multiple of `channels_` from diagonal)
+    // and we still fit in the window
+    // TODO(klecki): is_used needs to be checked as if-any in AccessSize
+    int farthest_window = window_element < 0 ? window_element + AccessSize - 1 : window_element - AccessSize + 1;
+    bool is_used = (::abs(farthest_window) <= radius) && address_iterator_.valid();
+        // (kInnerConv ? (window_element == dist_diag) : true) && address_iterator_.valid();
+    if (is_used) {
+      // Deal with alignment issues
+      AccessType dst;
+      load_vec<true, kInnerConv>(dst, window_element);
+      // add all negative coordinates, pattern is twice the dist up, twice the dist down.
+      // we need to have those checks for ANY element in the range
+      // TODO(klecki): for now only for the InnerConv - contiguous-coord decreasing
+      // access covers window_element .. window_element - AccessSize + 1
+      // TODO(klecki): The outer conv needs to mask out some elements of the vector
+      // when we are at the edge, and not the whole vectors
+      int neg_element = window_element;
+      // int neg_compensation = kInnerConv ? 0 : AccessSize - 1;
+      int pos_compensation = kInnerConv ? -AccessSize + 1 : -AccessSize + 1;
+      int neg_compensation = kInnerConv ? 0 : AccessSize - 1;
+      while (true) {
+        neg_element -= 2 * dist_begin;
+        if (-neg_element - neg_compensation <= radius) {
+          if (kInnerConv && dist_begin >= Channels())
+            load_vec<false>(dst, neg_element);
+          else
+            load_vec<false, true>(dst, neg_element, dist_begin == 0, false);
+        } else {
+          break;
+        }
+        neg_element -= 2 * dist_end;
+        if (-neg_element - neg_compensation <= radius) {
+          if (kInnerConv && dist_end >= Channels())
+            load_vec<false>(dst, neg_element);
+          else
+            load_vec<false, kInnerConv>(dst, neg_element, false, dist_end == AccessSize - 1);
+        } else {
+          break;
+        }
+      }
+      // add all positive coordinates
+      int pos_element = window_element;
+      // twice the dist down, twice the dist up
+      while (true) {
+        pos_element += 2 * dist_end;
+        if (pos_element + pos_compensation <= radius) {
+          if (kInnerConv && dist_end >= Channels())
+            load_vec<false>(dst, pos_element);
+          else
+            load_vec<false, true>(dst, pos_element, false, dist_end == AccessSize - 1);
+        } else {
+          break;
+        }
+        pos_element += 2 * dist_begin;
+        if (pos_element + pos_compensation <= radius) {
+          if (kInnerConv && dist_begin >= Channels())
+            load_vec<false>(dst, pos_element);
+          else
+            load_vec<false, kInnerConv>(dst, pos_element, dist_begin == 0, false);
+        } else {
+          break;
+        }
+      }
+      frag_ptr[idx] = dst;
+    } else {
+      for (int i = 0; i < AccessSize; i++) {
+        frag_ptr[idx][i] = static_cast<Element>(0);
+      }
+    }
+  }
+
+  CUTLASS_DEVICE
   void load_with_byte_offset(Fragment &frag, LongIndex byte_offset) {
-    PRINT_IF
-      printf("LOAD: kStrided: %d, kContiguous: %d, kAccessesPerVector: %d\n", ThreadMap::Iterations::kStrided, ThreadMap::Iterations::kContiguous, kAccessesPerVector);
 
     AccessType *frag_ptr = reinterpret_cast<AccessType *>(&frag);
 
@@ -556,115 +659,14 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
     for (int s = 0; s < ThreadMap::Iterations::kStrided; ++s) {
       CUTLASS_PRAGMA_UNROLL
       for (int c = 0; c < ThreadMap::Iterations::kContiguous; ++c) {
-
         CUTLASS_PRAGMA_UNROLL
         for (int v = 0; v < kAccessesPerVector; ++v) {
-
           int idx = (v + kAccessesPerVector * (c + s * ThreadMap::Iterations::kContiguous));
           // This is to mark the iteration number as a compile time constant
           address_iterator_.set_iteration_index(idx);
 
-          // This calculates the logical coordinate of the beggining of access
-          TensorCoord current_coord = address_iterator_.get_current_coord();
-          // if (threadIdx.x == 0) {
-          //   printf("LOADING COORD: %d %d\n", current_coord.strided(), current_coord.contiguous());
-          // }
+          load_access_elements(frag_ptr, idx);
 
-          // calculate based on the coord and access the pointer_ + appropriate offset
-          int major_coord = 0;
-          int minor_coord = 0;
-          int major_extent = 0;
-          if (kInnerConv) {
-            // we generate matrix by placing windows vertically, so the row is the major coordinate
-            major_coord = current_coord.strided(); // row
-            minor_coord = current_coord.contiguous(); // col
-            major_extent = address_iterator_.get_extent().strided();
-          } else {
-            // we generate matrix by placing windows horizontally and there is no channel-based spacing
-            major_coord = current_coord.contiguous(); // col
-            minor_coord = current_coord.strided(); // row
-            major_extent = address_iterator_.get_extent().contiguous();
-          }
-          // for lhs operand, the problem is transposed and the channel computation can be skipped
-          // distance from diagonal in major coordinate direction
-          int diag_dist = major_coord - minor_coord; // distance from diagonal - coordinate (x, x), negative are above
-          // this is the starting element of the window, for inner-conv vector load goes in negative order
-          int window_element = diag_dist;
-          int radius = (window_size_ / 2) * Channels();
-          // element is used if it's our channel (we're multiple of `channels_` from diagonal)
-          // and we still fit in the window
-          // TODO(klecki): is_used needs to be checked as if-any in AccessSize
-          int farthest_window = window_element < 0 ? window_element + AccessSize - 1 : window_element - AccessSize + 1;
-          bool is_used = (::abs(farthest_window) <= radius) && address_iterator_.valid();
-              // (kInnerConv ? (window_element == diag_dist) : true) && address_iterator_.valid();
-          if (is_used) {
-            // Deal with alignment issues
-            AccessType dst;
-            load_vec<true, kInnerConv>(dst, window_element);
-
-            // Border handling, eliminate the remainder (channel offset from the position calculation,
-            // so it is not repeated by every addition - effectivelly we would change the channel)
-            int dist_up = (major_coord / Channels()) * Channels();
-            int dist_down = ((major_extent - 1 - major_coord) / Channels()) * Channels();
-            // add all negative coordinates, pattern is twice the dist up, twice the dist down.
-            // we need to have those checks for ANY element in the range
-            // TODO(klecki): for now only for the InnerConv - contiguous-coord decreasing
-            // access covers window_element .. window_element - AccessSize + 1
-            // TODO(klecki): The outer conv needs to mask out some elements of the vector
-            // when we are at the edge, and not the whole vectors
-            int neg_element = window_element;
-            // int neg_compensation = kInnerConv ? 0 : AccessSize - 1;
-            int pos_compensation = kInnerConv ? -AccessSize + 1 : -AccessSize + 1;
-            int neg_compensation = kInnerConv ? 0 : AccessSize - 1;
-            while (true) {
-              neg_element -= 2 * dist_up;
-              if (-neg_element - neg_compensation <= radius) {
-                if (kInnerConv && dist_up >= Channels())
-                  load_vec<false>(dst, neg_element);
-                else
-                  load_vec<false, true>(dst, neg_element, dist_up == 0, false);
-              } else {
-                break;
-              }
-              neg_element -= 2 * dist_down;
-              if (-neg_element - neg_compensation <= radius) {
-                if (kInnerConv && dist_down >= Channels())
-                  load_vec<false>(dst, neg_element);
-                else
-                  load_vec<false, kInnerConv>(dst, neg_element, false, dist_down == AccessSize - 1);
-              } else {
-                break;
-              }
-            }
-            // add all positive coordinates
-            int pos_element = window_element;
-            // twice the dist down, twice the dist up
-            while (true) {
-              pos_element += 2 * dist_down;
-              if (pos_element + pos_compensation <= radius) {
-                if (kInnerConv && dist_down >= Channels())
-                  load_vec<false>(dst, pos_element);
-                else
-                  load_vec<false, true>(dst, pos_element, false, dist_down == AccessSize - 1);
-              } else {
-                break;
-              }
-              pos_element += 2 * dist_up;
-              if (pos_element + pos_compensation <= radius) {
-                if (kInnerConv && dist_up >= Channels())
-                  load_vec<false>(dst, pos_element);
-                else
-                  load_vec<false, kInnerConv>(dst, pos_element, dist_up == 0, false);
-              } else {
-                break;
-              }
-            }
-            frag_ptr[idx] = dst;
-          } else {
-            for (int i = 0; i < AccessSize; i++) {
-              frag_ptr[idx][i] = static_cast<Element>(0);
-            }
-          }
           ++address_iterator_;
         }
       }
