@@ -438,244 +438,8 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
     load_with_byte_offset(frag, pointer_offset * sizeof_bits<Element>::value / 8);
   }
 
-  // todo(klecki): place in private
-  CUTLASS_DEVICE
-  void mux(AccessType &dst, const AccessType &lo, const AccessType &hi, int offset) {
-    // offset is limited to 0..AccessSize
-    offset = ::max(0, ::min(offset, AccessSize));
-    #pragma unroll
-    for (int i = 0; i < AccessSize - offset; i++) {
-      dst[i] = static_cast<Element>(lo[i + offset]);
-    }
-    #pragma unroll
-    for (int i = AccessSize - offset; i < AccessSize; i++) {
-      dst[i] = static_cast<Element>(hi[i - AccessSize + offset]);
-    }
-  }
-
-  CUTLASS_DEVICE
-  void mux_add(AccessType &dst, const AccessType &lo, const AccessType &hi, int offset) {
-    // offset is limited to 0..AccessSize
-    offset = ::max(0, ::min(offset, AccessSize));
-    #pragma unroll
-    for (int i = 0; i < AccessSize - offset; i++) {
-      // TODO(klecki) there is an issue with half, that prohibits me from doing:
-      // dst[i] += static_cast<Element>(lo[i + offset]);
-      Element tmp = static_cast<Element>(dst[i]) + static_cast<Element>(lo[i + offset]);
-      dst[i] = tmp;
-    }
-    #pragma unroll
-    for (int i = AccessSize - offset; i < AccessSize; i++) {
-      Element tmp = static_cast<Element>(dst[i]) + static_cast<Element>(hi[i - AccessSize + offset]);
-      dst[i] = tmp;
-    }
-  }
-
-  template <bool mirrored>
-  CUTLASS_DEVICE
-  int get_lo_offset(int window_element) {
-    // for Inner Convolution the window is in reverse when traversing in contiguous axis
-    if (mirrored) {
-     window_element *= -1;
-    }
-    if (window_element >= 0) {
-      return (window_element / AccessSize) * AccessSize;
-    }
-    return ((window_element - (AccessSize - 1)) / AccessSize) * AccessSize;
-  }
-
-  template <bool mirrored>
-  CUTLASS_DEVICE
-  int get_offset(int window_element, int lo_offset) {
-    if (mirrored) {
-      assert(lo_offset <= -window_element);
-      return -window_element - lo_offset;
-    }
-    assert(lo_offset <= window_element);
-    return window_element - lo_offset;
-  }
-
-  struct aligned_offset_data {
-    int aligned_element; // aligned to multiple of AccessSize window element
-    int offset; // positive offset to original element
-  };
-
-  template <bool mirrored>
-  CUTLASS_DEVICE
-  aligned_offset_data get_aligned_offset(int window_element) {
-    static_assert(!kInnerConv || mirrored, "All lookups are mirrored for Inner Conv.");
-    int lo_element = get_lo_offset<mirrored>(window_element);
-    int offset = get_offset<mirrored>(window_element, lo_element);
-    return {lo_element, offset};
-  }
-
-  template <bool mirrored = true>
-  CUTLASS_DEVICE
-  void load_vec(AccessType &dst, int window_element) {
-    auto aligned_offset = get_aligned_offset<mirrored>(window_element);
-    constexpr int window_center = kInnerConv || !mirrored ? 256 : 512;
-    const auto *access_ptr = reinterpret_cast<AccessType const *>(pointer_ + window_center + aligned_offset.aligned_element);
-    mux(dst, access_ptr[0], access_ptr[1], aligned_offset.offset);
-  }
-
-  template <bool mirrored = true, bool InnerConv_ = kInnerConv>
-  CUTLASS_DEVICE
-  std::enable_if_t<InnerConv_> add_vec(AccessType &dst, int window_element, bool mask_first, bool mask_last) {
-    // In inner conv, we skip rows
-    if (mask_first || mask_last) {
-      return;
-    }
-    auto aligned_offset = get_aligned_offset<mirrored>(window_element);
-    constexpr int window_center = kInnerConv || !mirrored ? 256 : 512;
-    const auto *access_ptr = reinterpret_cast<AccessType const *>(pointer_ + window_center + aligned_offset.aligned_element);
-    mux_add(dst, access_ptr[0], access_ptr[1], aligned_offset.offset);
-  }
-
-  template <bool mirrored, bool InnerConv_ = kInnerConv>
-  CUTLASS_DEVICE
-  std::enable_if_t<!InnerConv_> add_vec(AccessType &dst, int window_element, bool mask_first, bool mask_last) {
-    // In outer conv we skip columns
-    int lo_offset = get_lo_offset<mirrored>(window_element);
-    int offset = get_offset<mirrored>(window_element, lo_offset);
-    constexpr int window_center = kInnerConv || !mirrored ? 256 : 512;
-    const auto *access_ptr = reinterpret_cast<AccessType const *>(pointer_ + window_center + lo_offset);
-    Element tmp = static_cast<Element>(0);
-
-    if (mask_first) {
-      tmp = static_cast<Element>(dst[0]);
-    } else if (mask_last) {
-      tmp = static_cast<Element>(dst[AccessSize - 1]);
-    }
-
-    mux_add(dst, access_ptr[0], access_ptr[1], offset);
-
-    if (mask_first) {
-      dst[0] = static_cast<Element>(tmp);
-    } else if (mask_last) {
-      dst[AccessSize - 1] = static_cast<Element>(tmp);
-    }
-  }
-
-  CUTLASS_DEVICE
-  int Channels() {
-    if (kInnerConv) {
-      switch (channels_) {
-        case 1:
-          return 1;
-        case 3:
-          return 3;
-        case 4:
-          return 4;
-        default:
-          return channels_;
-      }
-    }
-    return 1;
-  }
-
-
-  // Whether to skip first row/column in border handling
-  // N.B. Border reflect 1001 would always return false here
-  CUTLASS_DEVICE
-  bool mask_first(int dist_first) {
-    if (kInnerConv) {
-      return dist_first < Channels();
-    } else {
-      return dist_first == 0;
-    }
-  }
-
-  CUTLASS_DEVICE
-  bool mask_last(int dist_last) {
-    if (kInnerConv) {
-      return dist_last < Channels();
-    } else {
-      return dist_last == AccessSize - 1;
-    }
-  }
-
-  /**
-   * @brief Check whether any of the `AccesType` elements to be loaded lies within the kernel window
-   */
-  template <bool mirrored>
-  CUTLASS_DEVICE
-  bool any_valid(int window_element, int radius) {
-    if (mirrored) {
-       // We will try to access [window_element, window_element - 1, ..., window_element - AccessSize + 1]
-       return ::abs(window_element) <= radius || ::abs(window_element - AccessSize + 1) <= radius;
-    } else {
-      // We will try to access [window_element, window_element + 1, ..., window_element + AccessSize - 1]
-      return ::abs(window_element) <= radius || ::abs(window_element + AccessSize - 1) <= radius;
-    }
-  }
-
-  template <bool mirrored>
-  CUTLASS_DEVICE
-  bool any_neg_valid(int window_element, int radius) {
-    // assert(window_element < 0)
-    if (mirrored) {
-       // We will try to access [window_element, window_element - 1, ..., window_element - AccessSize + 1]
-       // so with with window_element < 0, the smallest dist to 0 is -window_element
-       return -window_element <= radius;
-    } else {
-      // We will try to access [window_element, window_element + 1, ..., window_element + AccessSize - 1]
-      return -window_element <= radius || ::abs(window_element + AccessSize - 1) <= radius;
-    }
-  }
-
-  template <bool mirrored>
-  CUTLASS_DEVICE
-  bool any_pos_valid(int window_element, int radius) {
-    if (mirrored) {
-       // We will try to access [window_element, window_element - 1, ..., window_element - AccessSize + 1]
-       return window_element <= radius || ::abs(window_element - AccessSize + 1) <= radius;
-    } else {
-      // We will try to access [window_element, window_element + 1, ..., window_element + AccessSize - 1]
-      return window_element <= radius;
-    }
-  }
-
-  CUTLASS_DEVICE
-  void add_border_reflect_101(AccessType &dst, int window_element, int radius, int dist_first, int dist_last) {
-    // add all negative coordinates, pattern is twice the dist to first, twice the dist last
-    int neg_element = window_element;
-    while (true) {
-      neg_element -= 2 * dist_first;
-      if (any_neg_valid<true>(neg_element, radius)) {
-        add_vec<true>(dst, neg_element, mask_first(dist_first), false);
-      } else {
-        break;
-      }
-      neg_element -= 2 * dist_last;
-      if (any_neg_valid<kInnerConv>(neg_element, radius)) {
-        add_vec<kInnerConv>(dst, neg_element, false, mask_last(dist_last));
-      } else {
-        break;
-      }
-    }
-    // add all positive coordinates
-    int pos_element = window_element;
-    // twice the dist to last, twice the dist to first
-    while (true) {
-      pos_element += 2 * dist_last;
-      if (any_pos_valid<true>(pos_element, radius)) {
-        add_vec<true>(dst, pos_element, false, mask_last(dist_last));
-      } else {
-        break;
-      }
-      pos_element += 2 * dist_first;
-      if (any_pos_valid<kInnerConv>(pos_element, radius)) {
-        add_vec<kInnerConv>(dst, pos_element, mask_first(dist_first), false);
-      } else {
-        break;
-      }
-    }
-
-  }
-
   CUTLASS_DEVICE
   void load_access_elements(AccessType *frag_ptr, int idx) {
-
     // This calculates the logical coordinate of the beggining of access
     TensorCoord current_coord = address_iterator_.get_current_coord();
 
@@ -691,10 +455,8 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
       int col = current_coord.contiguous(); // col
       int height = address_iterator_.get_extent().strided();
       dist_diag = row - col; // negative above coordinate
-      // Border handling, eliminate the remainder (channel offset from the position calculation,
-      // so it is not repeated by every addition - effectively we would change the channel)
-      dist_first = (row / Channels()) * Channels();
-      dist_last = ((height - 1 - row) / Channels()) * Channels();
+      dist_first = row;
+      dist_last = height - 1 - row;
     } else {
       // we generate matrix by placing windows horizontally and there is no channel-based spacing
       int row = current_coord.strided(); // row
@@ -784,6 +546,302 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
   /// Store a fragment to memory
   CUTLASS_DEVICE
   void store(Fragment const &frag) { store_with_byte_offset(frag, 0); }
+
+ private:
+
+  /**
+   * @brief Fill the dst with elements of lo[offset...AccessSize-1], hi[0...AccessSize - 1 - offset]
+   */
+  CUTLASS_DEVICE
+  void mux(AccessType &dst, const AccessType &lo, const AccessType &hi, int offset) {
+    // offset is limited to 0..AccessSize
+    offset = ::max(0, ::min(offset, AccessSize));
+    #pragma unroll
+    for (int i = 0; i < AccessSize - offset; i++) {
+      dst[i] = static_cast<Element>(lo[i + offset]);
+    }
+    #pragma unroll
+    for (int i = AccessSize - offset; i < AccessSize; i++) {
+      dst[i] = static_cast<Element>(hi[i - AccessSize + offset]);
+    }
+  }
+
+  /**
+   * @brief Add to the dst elements from lo[offset...AccessSize-1], hi[0...AccessSize - 1 - offset]
+   */
+  CUTLASS_DEVICE
+  void mux_add(AccessType &dst, const AccessType &lo, const AccessType &hi, int offset) {
+    // offset is limited to 0..AccessSize
+    offset = ::max(0, ::min(offset, AccessSize));
+    #pragma unroll
+    for (int i = 0; i < AccessSize - offset; i++) {
+      // TODO(klecki) there is an issue with half, that prohibits me from doing:
+      // dst[i] += static_cast<Element>(lo[i + offset]);
+      Element tmp = static_cast<Element>(dst[i]) + static_cast<Element>(lo[i + offset]);
+      dst[i] = tmp;
+    }
+    #pragma unroll
+    for (int i = AccessSize - offset; i < AccessSize; i++) {
+      Element tmp = static_cast<Element>(dst[i]) + static_cast<Element>(hi[i - AccessSize + offset]);
+      dst[i] = tmp;
+    }
+  }
+
+  /**
+   * @brief Get the index of window_element that is multiple of AccessSize and smaller than
+   * window_element
+   */
+  template <bool mirrored>
+  CUTLASS_DEVICE
+  int get_lo_offset(int window_element) {
+    // for Inner Convolution the window is in reverse when traversing in contiguous axis
+    if (mirrored) {
+     window_element *= -1;
+    }
+    if (window_element >= 0) {
+      return (window_element / AccessSize) * AccessSize;
+    }
+    return ((window_element - (AccessSize - 1)) / AccessSize) * AccessSize;
+  }
+
+  /**
+   * @brief Get offset from aligned `lo_offset` to current `window_element`
+   */
+  template <bool mirrored>
+  CUTLASS_DEVICE
+  int get_offset(int window_element, int lo_offset) {
+    if (mirrored) {
+      assert(lo_offset <= -window_element);
+      return -window_element - lo_offset;
+    }
+    assert(lo_offset <= window_element);
+    return window_element - lo_offset;
+  }
+
+  struct aligned_offset_data {
+    int aligned_element; // aligned to multiple of AccessSize window element
+    int offset; // positive offset to original element
+  };
+
+  template <bool mirrored>
+  CUTLASS_DEVICE
+  aligned_offset_data get_aligned_offset(int window_element) {
+    static_assert(!kInnerConv || mirrored, "All lookups are mirrored for Inner Conv.");
+    int lo_element = get_lo_offset<mirrored>(window_element);
+    int offset = get_offset<mirrored>(window_element, lo_element);
+    return {lo_element, offset};
+  }
+
+  /**
+   * @brief Load dst with kernel elements starting at `window_element`
+   *
+   * @tparam mirrored - whether elements should be increasing or not.
+   * Note that it's always mirrored=true for Inner conv.
+   */
+  template <bool mirrored = true>
+  CUTLASS_DEVICE
+  void load_vec(AccessType &dst, int window_element) {
+    auto aligned_offset = get_aligned_offset<mirrored>(window_element);
+    constexpr int window_center = kInnerConv || !mirrored ? 256 : 512;
+    const auto *access_ptr = reinterpret_cast<AccessType const *>(pointer_ + window_center + aligned_offset.aligned_element);
+    mux(dst, access_ptr[0], access_ptr[1], aligned_offset.offset);
+  }
+
+  /**
+   * @brief Load and add kernel elements from window_element - Inner Conv variant
+   *
+   * In inner conv, we skip first and last row for border handling,
+   * as the loads are row-wise, this can be a no-op if mask_first or mask_last is true.
+   */
+  template <bool mirrored = true, bool InnerConv_ = kInnerConv>
+  CUTLASS_DEVICE
+  std::enable_if_t<InnerConv_> add_vec(AccessType &dst, int window_element, bool mask_first, bool mask_last) {
+    static_assert(mirrored, "All accesses should be mirrored for inner conv.");
+    if (mask_first || mask_last) {
+      return;
+    }
+    auto aligned_offset = get_aligned_offset<mirrored>(window_element);
+    constexpr int window_center = kInnerConv || !mirrored ? 256 : 512;
+    const auto *access_ptr = reinterpret_cast<AccessType const *>(pointer_ + window_center + aligned_offset.aligned_element);
+    mux_add(dst, access_ptr[0], access_ptr[1], aligned_offset.offset);
+  }
+
+  /**
+   * @brief Load and add kernel elements from window_element - Outer Conv variant
+   *
+   * In inner conv, we skip first and last column for border handling,
+   * so we sometimes need to mask the addition of first of last vector element.
+   * As for "vector aligned" loads, the data must be a multpile of that size, we only do it
+   * for the first or last element.
+   */
+  template <bool mirrored, bool InnerConv_ = kInnerConv>
+  CUTLASS_DEVICE
+  std::enable_if_t<!InnerConv_> add_vec(AccessType &dst, int window_element, bool mask_first, bool mask_last) {
+    // In outer conv we skip columns
+    int lo_offset = get_lo_offset<mirrored>(window_element);
+    int offset = get_offset<mirrored>(window_element, lo_offset);
+    constexpr int window_center = kInnerConv || !mirrored ? 256 : 512;
+    const auto *access_ptr = reinterpret_cast<AccessType const *>(pointer_ + window_center + lo_offset);
+    Element tmp = static_cast<Element>(0);
+
+    if (mask_first) {
+      tmp = static_cast<Element>(dst[0]);
+    } else if (mask_last) {
+      tmp = static_cast<Element>(dst[AccessSize - 1]);
+    }
+
+    mux_add(dst, access_ptr[0], access_ptr[1], offset);
+
+    if (mask_first) {
+      dst[0] = static_cast<Element>(tmp);
+    } else if (mask_last) {
+      dst[AccessSize - 1] = static_cast<Element>(tmp);
+    }
+  }
+
+  /**
+   * @brief Channel information is necessary only for inner convolution, for outer it's always 1
+   */
+  CUTLASS_DEVICE
+  int Channels() {
+    if (kInnerConv) {
+      switch (channels_) {
+        case 1:
+          return 1;
+        case 3:
+          return 3;
+        case 4:
+          return 4;
+        default:
+          return channels_;
+      }
+    }
+    return 1;
+  }
+
+  /**
+   * @brief Whether to skip first row/column in border handling
+   *
+   * N.B. Border reflect 1001 would always return false here
+   */
+  CUTLASS_DEVICE
+  bool mask_first(int dist_first) {
+    if (kInnerConv) {
+      return dist_first < Channels();
+    } else {
+      return dist_first == 0;
+    }
+  }
+
+  /**
+   * @brief Whether to skip last row/column in border handling
+   */
+  CUTLASS_DEVICE
+  bool mask_last(int dist_last) {
+    if (kInnerConv) {
+      return dist_last < Channels();
+    } else {
+      return dist_last == AccessSize - 1;
+    }
+  }
+
+  /**
+   * @brief Check whether any of the `AccesType` elements to be loaded lies within the kernel window
+   */
+  template <bool mirrored>
+  CUTLASS_DEVICE
+  bool any_valid(int window_element, int radius) {
+    if (mirrored) {
+       // We will try to access [window_element, window_element - 1, ..., window_element - AccessSize + 1]
+       return ::abs(window_element) <= radius || ::abs(window_element - AccessSize + 1) <= radius;
+    } else {
+      // We will try to access [window_element, window_element + 1, ..., window_element + AccessSize - 1]
+      return ::abs(window_element) <= radius || ::abs(window_element + AccessSize - 1) <= radius;
+    }
+  }
+
+  /**
+   * @brief Check whether any of the `AccesType` elements to be loaded lies within the kernel window
+   * assuming that window_element is nonpositive
+   */
+  template <bool mirrored>
+  CUTLASS_DEVICE
+  bool any_neg_valid(int window_element, int radius) {
+    // assert(window_element <= 0)
+    if (mirrored) {
+       // We will try to access [window_element, window_element - 1, ..., window_element - AccessSize + 1]
+       // so with with window_element < 0, the smallest dist to 0 is -window_element
+       return -window_element <= radius;
+    } else {
+      // We will try to access [window_element, window_element + 1, ..., window_element + AccessSize - 1]
+      return -window_element <= radius || ::abs(window_element + AccessSize - 1) <= radius;
+    }
+  }
+
+  /**
+   * @brief Check whether any of the `AccesType` elements to be loaded lies within the kernel window
+   * assuming that window_element is nonnegative
+   */
+  template <bool mirrored>
+  CUTLASS_DEVICE
+  bool any_pos_valid(int window_element, int radius) {
+    // assert(window_element >= 0)
+    if (mirrored) {
+       // We will try to access [window_element, window_element - 1, ..., window_element - AccessSize + 1]
+       return window_element <= radius || ::abs(window_element - AccessSize + 1) <= radius;
+    } else {
+      // We will try to access [window_element, window_element + 1, ..., window_element + AccessSize - 1]
+      return window_element <= radius;
+    }
+  }
+
+  /**
+   * @brief Emulate border reflect 101 and add necessary elements to AccessTypes
+   * based on window_elment loaded for current position and distance to first and last row/column
+   * for the outer/inner convolution (windows are placed as rows/columns).
+   */
+  CUTLASS_DEVICE
+  void add_border_reflect_101(AccessType &dst, int window_element, int radius, int dist_first, int dist_last) {
+    // add all negative coordinates, pattern is twice the dist to first, twice the dist last
+    if (kInnerConv) {
+      // Border handling, eliminate the remainder (channel offset from the position calculation,
+      // so it is not repeated by every addition - effectively we would change the channel)
+      dist_first = (dist_first / Channels()) * Channels();
+      dist_last = (dist_last / Channels()) * Channels();
+    }
+    int neg_element = window_element;
+    while (true) {
+      neg_element -= 2 * dist_first;
+      if (any_neg_valid<true>(neg_element, radius)) {
+        add_vec<true>(dst, neg_element, mask_first(dist_first), false);
+      } else {
+        break;
+      }
+      neg_element -= 2 * dist_last;
+      if (any_neg_valid<kInnerConv>(neg_element, radius)) {
+        add_vec<kInnerConv>(dst, neg_element, false, mask_last(dist_last));
+      } else {
+        break;
+      }
+    }
+    // add all positive coordinates
+    int pos_element = window_element;
+    // twice the dist to last, twice the dist to first
+    while (true) {
+      pos_element += 2 * dist_last;
+      if (any_pos_valid<true>(pos_element, radius)) {
+        add_vec<true>(dst, pos_element, false, mask_last(dist_last));
+      } else {
+        break;
+      }
+      pos_element += 2 * dist_first;
+      if (any_pos_valid<kInnerConv>(pos_element, radius)) {
+        add_vec<kInnerConv>(dst, pos_element, mask_first(dist_first), false);
+      } else {
+        break;
+      }
+    }
+  }
 };
 
 ////////////////////////////////////////////////////////////////////////////////
