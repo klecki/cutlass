@@ -97,12 +97,21 @@ template <
     bool InnerConv = true
     >
 struct SpecializedConvMma {
+  // TODO(klecki): HERE WE CAN SET SOME OTHER TYPES???
+
   using UnderlyingMma = DefaultMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB, kAlignmentB,
 				ElementAccumulator, LayoutC, OperatorClass, ArchTag, ThreadblockShape, WarpShape,
 				InstructionShape, Stages, Operator, AccumulatorsInRowMajor>;
 
+
+  // Select SMEM iterators that use ElementAccumulator type as storage (and computation)
+  // instead of ElementA and ElementB
+  using UnderlyingMmaProcessing = DefaultMma<float, LayoutA, kAlignmentA, float, LayoutB, kAlignmentB,
+				ElementAccumulator, LayoutC, OperatorClass, ArchTag, ThreadblockShape, WarpShape,
+				InstructionShape, Stages, Operator, AccumulatorsInRowMajor>;
+
 	 // Define the MmaCore components
-  using MmaCore = typename UnderlyingMma::MmaCore;
+  using MmaCore = typename UnderlyingMmaProcessing::MmaCore;
 
   static int const kInnerConv = InnerConv;
 

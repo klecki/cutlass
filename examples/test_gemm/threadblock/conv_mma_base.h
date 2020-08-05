@@ -81,6 +81,7 @@ template <
     typename Policy_,
     /// Number of stages,
     int Stages,
+    typename WindowGlobalElement_,
     /// Used for partial specialization
     typename Enable = bool>
 class ConvMmaBase {
@@ -95,7 +96,7 @@ class ConvMmaBase {
   // Dependent types
   //
 
-
+  using WindowGlobalElement = WindowGlobalElement_;
 
   /// Warp-level Mma
   using Operator = typename Policy::Operator;
@@ -125,7 +126,7 @@ class ConvMmaBase {
 
   /// Tensor reference to the B operand
   // using TensorRefWindow = TensorRef<typename Operator::ElementB, layout::RowMajor>;
-  using TensorRefWindow = TensorRef<typename Operator::ElementB, layout::PitchLinear>;
+  using TensorRefWindow = TensorRef<WindowGlobalElement, layout::PitchLinear>;
 
   static int const kWindowLength = 1024; // (todo): klecki some sensible max window size
   // maybe do kWindowLength = kFactor * Shape::kK; so we have some control over that?
@@ -173,7 +174,7 @@ class ConvMmaBase {
     AlignedBuffer<typename Operator::ElementB, ShapeB::kCount> operand_B;
 
     // Buffer for Convolution Window
-    AlignedBuffer<typename Operator::ElementB, ShapeWindow::kCount> operand_Window;
+    AlignedBuffer<WindowGlobalElement, ShapeWindow::kCount> operand_Window;
 
    public:
 

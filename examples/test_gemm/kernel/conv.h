@@ -40,6 +40,9 @@
 #include "cutlass/transform/pitch_linear_thread_map.h"
 #include "cutlass/transform/threadblock/predicated_tile_iterator.h"
 #include "cutlass/transform/threadblock/regular_tile_iterator.h"
+#include "cutlass/numeric_conversion.h"
+
+#include "cutlass/util/device_dump.h"
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -219,7 +222,10 @@ struct Conv {
     using WindowThreadMap = transform::PitchLinearStripminedThreadMap<WindowShape, kThreadCount>;
 
     // Define the PredicateTileIterator, using TileShape, Element, Layout, and ThreadMap types
-    using WindowIterator = transform::threadblock::PredicatedTileIterator<
+    using WindowIteratorGmem = transform::threadblock::PredicatedTileIterator<
+        WindowShape, WindowElement, WindowLayout, 0, WindowThreadMap>;
+
+    using WindowIteratorSmem = transform::threadblock::PredicatedTileIterator<
         WindowShape, WindowElement, WindowLayout, 0, WindowThreadMap>;
 
     // cutlass::Coord<2> window_extent = cutlass::make_Coord(params.window_size, 1);
@@ -230,15 +236,21 @@ struct Conv {
     cutlass::Coord<2> window_extent = cutlass::make_Coord(1024, 1);
     int iterations = (1024 + WindowShape::kContiguous - 1) / WindowShape::kContiguous;
 
-    WindowIterator src_iterator(params.ref_conv_Window.layout(), params.ref_conv_Window.data(), window_extent, threadIdx.x);
-    WindowIterator dst_iterator(window_smem.layout(), window_smem.data(), window_extent, threadIdx.x);
+    WindowIteratorGmem src_iterator(params.ref_conv_Window.layout(), params.ref_conv_Window.data(), window_extent, threadIdx.x);
+    WindowIteratorSmem dst_iterator(window_smem.layout(), window_smem.data(), window_extent, threadIdx.x);
 
-    typename WindowIterator::Fragment fragment;
+    typename WindowIteratorGmem::Fragment fragment;
+    // using Transform = NumericArrayConverter<
+    //   WindowElement,
+    //   WindowElement,
+    //   WindowIteratorGmem::Fragment::kElements>;
 
+    // Transform transform_window = Transform();
 
     fragment.clear();
 
     src_iterator.load(fragment);
+    // debug::dump_fragment(fragment, 1);
     dst_iterator.store(fragment);
     ++src_iterator;
     ++dst_iterator;

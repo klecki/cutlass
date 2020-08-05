@@ -90,11 +90,11 @@ template <
   /// Used for partial specialization
   typename Enable = bool
 >
-class ConvMmaPipelined : public ConvMmaBase<Shape_, Policy_, 2> {
+class ConvMmaPipelined : public ConvMmaBase<Shape_, Policy_, 2, std::conditional_t<InnerConv, typename IteratorB_::Element, typename IteratorA_::Element>> {
 public:
 
   ///< Base class
-  using Base = ConvMmaBase<Shape_, Policy_, 2>;
+  using Base = ConvMmaBase<Shape_, Policy_, 2, std::conditional_t<InnerConv, typename IteratorB_::Element, typename IteratorA_::Element>>;
   // static const int x__ = Debugx<2222, Base>::f();
 
   static int const kInnerConv = InnerConv;
@@ -106,6 +106,7 @@ public:
 
   using IteratorIn = std::conditional_t<kInnerConv, IteratorA, IteratorB>;  ///< Input operand in global memory
   using IteratorWindow = std::conditional_t<kInnerConv, IteratorB, IteratorA>;  ///< Window Matrix generated on the fly
+
 
   // using ConvolutionIterator = std::conditional_t<kInnerConv, typename Mma::IteratorB, typename Mma::IteratorA>;
 
@@ -130,8 +131,14 @@ public:
   using SmemIteratorA = SmemIteratorA_;
   using SmemIteratorB = SmemIteratorB_;
 
+  using SmemIteratorIn = std::conditional_t<kInnerConv, SmemIteratorA, SmemIteratorB>;
+  using SmemIteratorWindow = std::conditional_t<kInnerConv, SmemIteratorB, SmemIteratorA>;
+
   using TransformA = TransformA_;
   using TransformB = TransformB_;
+
+  using TransformIn = std::conditional_t<kInnerConv, TransformA, TransformB>;
+  using TransformWindow = std::conditional_t<kInnerConv, TransformB, TransformA>;
 
   //
   // Dependent types
@@ -305,6 +312,8 @@ public:
 
     this->warp_tile_iterator_A_.load(warp_frag_A[0]);
     this->warp_tile_iterator_B_.load(warp_frag_B[0]);
+    // debug::dump_fragment(warp_frag_A[0], 1);
+    // debug::dump_fragment(warp_frag_B[0], 1);
 
     ++this->warp_tile_iterator_A_;
     ++this->warp_tile_iterator_B_;

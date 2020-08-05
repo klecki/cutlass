@@ -277,30 +277,6 @@ class Conv {
     kInnerConv
   >::GemmKernel;
 
-  // using GemmKernelOuter = typename kernel::DefaultConv<
-  //   ElementIn,
-  //   LayoutIn,
-  //   kAlignmentA,
-  //   ElementWindow,
-  //   LayoutWindow,
-  //   kAlignmentB,
-  //   ElementOut,
-  //   LayoutOut,
-  //   ElementAccumulator,
-  //   OperatorClass,
-  //   ArchTag,
-  //   ThreadblockShape,
-  //   WarpShape,
-  //   InstructionShape,
-  //   EpilogueOutputOp,
-  //   ThreadblockSwizzle,
-  //   kStages,
-  //   kSplitKSerial,
-  //   Operator,
-  //   kIsBetaZero,
-  //   false
-  // >::GemmKernel;
-
   /// Argument structure
   struct Arguments {
 

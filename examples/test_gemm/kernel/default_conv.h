@@ -145,7 +145,7 @@ struct DefaultConv {
       Operator, IsBetaZero, InnerConv>::ThreadblockMma;
 
   /// Define the epilogue
-  using Epilogue =typename UnderlyingConv::Epilogue;
+  using Epilogue = typename UnderlyingConv::Epilogue;
 
   /// Define the kernel-level GEMM operator.
   using GemmKernel = kernel::Conv<Mma, Epilogue, ThreadblockSwizzle, SplitKSerial>;

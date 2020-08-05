@@ -80,9 +80,9 @@ int print = 1;
 static constexpr int kWindowSize = 15;
 static constexpr bool kInnerConv = true;
 
-using A_type = float;
-using B_type = float;
-using C_type = float;
+using A_type = int;
+using B_type = int;
+using C_type = int;
 
 /// Define a CUTLASS GEMM template and launch a GEMM kernel.
 template <bool InnerConv>
@@ -785,7 +785,7 @@ cudaError_t TestCutlassConv(int height, int width, int channels, A_type alpha, C
       for (int col = 0; col < N; col++) {
         if (host_cutlass[row * ldc + col] != host_reference[row * ldc + col]) {
           std::cerr << "CUTLASS results incorrect: (" << row << ", " << col << "): "
-            << static_cast<float>(host_cutlass[row * ldc + col]) << " != " << static_cast<float>(host_reference[row * ldc + col]) << std::endl;
+            << static_cast<C_type>(host_cutlass[row * ldc + col]) << " != " << static_cast<C_type>(host_reference[row * ldc + col]) << std::endl;
             // return cudaErrorUnknown;
         }
       }
