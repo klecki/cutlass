@@ -153,7 +153,7 @@ namespace threadblock {
 //  x,  x,  x,  x,  x,  2,  1,  0,
 //
 // where number stands for particular kernel window element, and x for actual 0 value
-// Now, let's consider border handling as "repeat 101". If we extended both image and
+// Now, let's consider border handling as "reflect 101". If we extended both image and
 // the generated matrix by the border elements, we would get:
 //
 // -2,  x,  x,  x,  x,  x,  x,  x   // -2
@@ -573,18 +573,104 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
     return 1;
   }
 
+
+  // Whether to skip first row/column in border handling
+  // N.B. Border reflect 1001 would always return false here
+  CUTLASS_DEVICE
+  bool mask_first(int dist_first) {
+    if (kInnerConv) {
+      return dist_first < Channels();
+    } else {
+      return dist_first == 0;
+    }
+  }
+
+  CUTLASS_DEVICE
+  bool mask_last(int dist_last) {
+    if (kInnerConv) {
+      return dist_last < Channels();
+    } else {
+      return dist_last == AccessSize - 1;
+    }
+  }
+
   /**
    * @brief Check whether any of the `AccesType` elements to be loaded lies within the kernel window
    */
+  template <bool mirrored>
   CUTLASS_DEVICE
-  bool valid(int window_element, int radius) {
-    if (kInnerConv) {
+  bool any_valid(int window_element, int radius) {
+    if (mirrored) {
        // We will try to access [window_element, window_element - 1, ..., window_element - AccessSize + 1]
        return ::abs(window_element) <= radius || ::abs(window_element - AccessSize + 1) <= radius;
     } else {
       // We will try to access [window_element, window_element + 1, ..., window_element + AccessSize - 1]
       return ::abs(window_element) <= radius || ::abs(window_element + AccessSize - 1) <= radius;
     }
+  }
+
+  template <bool mirrored>
+  CUTLASS_DEVICE
+  bool any_neg_valid(int window_element, int radius) {
+    // assert(window_element < 0)
+    if (mirrored) {
+       // We will try to access [window_element, window_element - 1, ..., window_element - AccessSize + 1]
+       // so with with window_element < 0, the smallest dist to 0 is -window_element
+       return -window_element <= radius;
+    } else {
+      // We will try to access [window_element, window_element + 1, ..., window_element + AccessSize - 1]
+      return -window_element <= radius || ::abs(window_element + AccessSize - 1) <= radius;
+    }
+  }
+
+  template <bool mirrored>
+  CUTLASS_DEVICE
+  bool any_pos_valid(int window_element, int radius) {
+    if (mirrored) {
+       // We will try to access [window_element, window_element - 1, ..., window_element - AccessSize + 1]
+       return window_element <= radius || ::abs(window_element - AccessSize + 1) <= radius;
+    } else {
+      // We will try to access [window_element, window_element + 1, ..., window_element + AccessSize - 1]
+      return window_element <= radius;
+    }
+  }
+
+  CUTLASS_DEVICE
+  void add_border_reflect_101(AccessType &dst, int window_element, int radius, int dist_first, int dist_last) {
+    // add all negative coordinates, pattern is twice the dist to first, twice the dist last
+    int neg_element = window_element;
+    while (true) {
+      neg_element -= 2 * dist_first;
+      if (any_neg_valid<true>(neg_element, radius)) {
+        add_vec<true>(dst, neg_element, mask_first(dist_first), false);
+      } else {
+        break;
+      }
+      neg_element -= 2 * dist_last;
+      if (any_neg_valid<kInnerConv>(neg_element, radius)) {
+        add_vec<kInnerConv>(dst, neg_element, false, mask_last(dist_last));
+      } else {
+        break;
+      }
+    }
+    // add all positive coordinates
+    int pos_element = window_element;
+    // twice the dist to last, twice the dist to first
+    while (true) {
+      pos_element += 2 * dist_last;
+      if (any_pos_valid<true>(pos_element, radius)) {
+        add_vec<true>(dst, pos_element, false, mask_last(dist_last));
+      } else {
+        break;
+      }
+      pos_element += 2 * dist_first;
+      if (any_pos_valid<kInnerConv>(pos_element, radius)) {
+        add_vec<kInnerConv>(dst, pos_element, mask_first(dist_first), false);
+      } else {
+        break;
+      }
+    }
+
   }
 
   CUTLASS_DEVICE
@@ -596,9 +682,9 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
     // Distance from diagonal in the dimension in which we place window (inner - column, outer - row)
     int dist_diag = 0;
     // Distance from first row/column for inner/outer convolution
-    int dist_begin = 0;
+    int dist_first = 0;
     // Distance from last row/column for inner/outer convolution
-    int dist_end = 0;
+    int dist_last = 0;
     if (kInnerConv) {
       // we generate matrix by placing windows vertically, so the row is the major coordinate
       int row = current_coord.strided(); // row
@@ -607,84 +693,26 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
       dist_diag = row - col; // negative above coordinate
       // Border handling, eliminate the remainder (channel offset from the position calculation,
       // so it is not repeated by every addition - effectively we would change the channel)
-      dist_begin = (row / Channels()) * Channels();
-      dist_end = ((height - 1 - row) / Channels()) * Channels();
+      dist_first = (row / Channels()) * Channels();
+      dist_last = ((height - 1 - row) / Channels()) * Channels();
     } else {
       // we generate matrix by placing windows horizontally and there is no channel-based spacing
       int row = current_coord.strided(); // row
       int col = current_coord.contiguous(); // col
       int width = address_iterator_.get_extent().contiguous();
       dist_diag = col - row;
-      dist_begin = col;
-      dist_end = width - 1 - col;
+      dist_first = col;
+      dist_last = width - 1 - col;
     }
     // this is the starting element of the window, for inner-conv vector load goes in negative order
     int window_element = dist_diag;
     int radius = (window_size_ / 2) * Channels();
-    // element is used if it's our channel (we're multiple of `channels_` from diagonal)
-    // and we still fit in the window
-    // TODO(klecki): is_used needs to be checked as if-any in AccessSize
-    // int farthest_window = window_element < 0 ? window_element + AccessSize - 1 : window_element - AccessSize + 1;
 
-    bool is_used = valid(window_element, radius) && address_iterator_.valid();
-        // (kInnerConv ? (window_element == dist_diag) : true) && address_iterator_.valid();
+    bool is_used = any_valid<kInnerConv>(window_element, radius) && address_iterator_.valid();
     if (is_used) {
-      // Deal with alignment issues
       AccessType dst;
       load_vec<kInnerConv>(dst, window_element);
-      // add all negative coordinates, pattern is twice the dist up, twice the dist down.
-      // we need to have those checks for ANY element in the range
-      // TODO(klecki): for now only for the InnerConv - contiguous-coord decreasing
-      // access covers window_element .. window_element - AccessSize + 1
-      // TODO(klecki): The outer conv needs to mask out some elements of the vector
-      // when we are at the edge, and not the whole vectors
-      int neg_element = window_element;
-      // int neg_compensation = kInnerConv ? 0 : AccessSize - 1;
-      int pos_compensation = kInnerConv ? -AccessSize + 1 : -AccessSize + 1;
-      int neg_compensation = kInnerConv ? 0 : AccessSize - 1;
-      while (true) {
-        neg_element -= 2 * dist_begin;
-        if (-neg_element - neg_compensation <= radius) {
-          if (kInnerConv)
-            add_vec<true>(dst, neg_element, dist_begin < Channels(), false);
-          else
-            add_vec<true>(dst, neg_element, dist_begin == 0, false);
-        } else {
-          break;
-        }
-        neg_element -= 2 * dist_end;
-        if (-neg_element - neg_compensation <= radius) {
-          if (kInnerConv)
-            add_vec<true>(dst, neg_element, false, dist_end < Channels());
-          else
-            add_vec<kInnerConv>(dst, neg_element, false, dist_end == AccessSize - 1);
-        } else {
-          break;
-        }
-      }
-      // add all positive coordinates
-      int pos_element = window_element;
-      // twice the dist down, twice the dist up
-      while (true) {
-        pos_element += 2 * dist_end;
-        if (pos_element + pos_compensation <= radius) {
-          if (kInnerConv)
-            add_vec<true>(dst, pos_element, false, dist_end < Channels());
-          else
-            add_vec<true>(dst, pos_element, false, dist_end == AccessSize - 1);
-        } else {
-          break;
-        }
-        pos_element += 2 * dist_begin;
-        if (pos_element + pos_compensation <= radius) {
-          if (kInnerConv)
-            add_vec<true>(dst, pos_element, dist_begin < Channels(), false);
-          else
-            add_vec<kInnerConv>(dst, pos_element, dist_begin == 0, false);
-        } else {
-          break;
-        }
-      }
+      add_border_reflect_101(dst, window_element, radius, dist_first, dist_last);
       frag_ptr[idx] = dst;
     } else {
       for (int i = 0; i < AccessSize; i++) {
