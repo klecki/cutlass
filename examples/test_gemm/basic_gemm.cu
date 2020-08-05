@@ -80,9 +80,9 @@ int print = 1;
 static constexpr int kWindowSize = 15;
 static constexpr bool kInnerConv = true;
 
-using A_type = cutlass::half_t;
-using B_type = cutlass::half_t;
-using C_type = cutlass::half_t;
+using A_type = float;
+using B_type = float;
+using C_type = float;
 
 /// Define a CUTLASS GEMM template and launch a GEMM kernel.
 template <bool InnerConv>
@@ -136,26 +136,26 @@ cudaError_t CutlassSgemmNN(
   using ShapeMMAOp = cutlass::gemm::GemmShape<8, 8, 4>;  // <- MMA Op tile M = 8, N = 8, K = 4
 
 
-  // using CutlassConv = typename cutlass::gemm::device::Conv<A_type,        // Data-type of A matrix
-  //                                                 RowMajor,  // Layout of A matrix
-  //                                                 B_type,        // Data-type of B matrix
-  //                                                 C_type,        // Data-type of C matrix
-  //                                                 RowMajor, 2, kInnerConv>; // Layout of C matrix
-
-
   using CutlassConv = typename cutlass::gemm::device::Conv<A_type,        // Data-type of A matrix
                                                   RowMajor,  // Layout of A matrix
                                                   B_type,        // Data-type of B matrix
                                                   C_type,        // Data-type of C matrix
-                                                  RowMajor,    // Layout of C matrix
-                                                  2, kInnerConv, // axes, InnerConv
-                                                  C_type,  // element acumulator
-                                                  MMAOp, // tensor op
-                                                  SmArch, // arch 70
-                                                  ShapeMMAThreadBlock, // we can probably leave default shapes, but we need gemm 8x8x4
-                                                  ShapeMMAWarp,
-                                                  ShapeMMAOp
-                                                  >;
+                                                  RowMajor, 2, kInnerConv>; // Layout of C matrix
+
+
+  // using CutlassConv = typename cutlass::gemm::device::Conv<A_type,        // Data-type of A matrix
+  //                                                 RowMajor,  // Layout of A matrix
+  //                                                 B_type,        // Data-type of B matrix
+  //                                                 C_type,        // Data-type of C matrix
+  //                                                 RowMajor,    // Layout of C matrix
+  //                                                 2, kInnerConv, // axes, InnerConv
+  //                                                 C_type,  // element acumulator
+  //                                                 MMAOp, // tensor op
+  //                                                 SmArch, // arch 70
+  //                                                 ShapeMMAThreadBlock, // we can probably leave default shapes, but we need gemm 8x8x4
+  //                                                 ShapeMMAWarp,
+  //                                                 ShapeMMAOp
+  //                                                 >;
 
   // Define a CUTLASS GEMM type
   CutlassConv gemm_operator;
@@ -234,14 +234,14 @@ __global__ void InitializeMatrix_kernel(
       // Generate arbitrary elements.
       // int const k = 16807;
       // int const m = 16;
-      // T value = T(((offset + seed) * k % m) - m / 2); // TODO modulo something
+      // T value = static_cast<T>(((offset + seed) * k % m) - m / 2); // TODO modulo something
       // T value = row * 100 + col;
 
-      T value = static_cast<T>(0.f);
-      if (row == col * channels + c)
-        value = static_cast<T>(1);
+      // T value = static_cast<T>(0.f);
+      // if (row == col * channels + c)
+      //   value = static_cast<T>(1);
 
-      matrix[offset] = value;
+      matrix[offset] = static_cast<T>(1);
 
     }
   }

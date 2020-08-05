@@ -253,7 +253,7 @@ class Conv {
   static bool const kInnerConv = InnerConv;
 
   /// Define the kernel, SIMT
-  using GemmKernelInner = typename kernel::DefaultConv<
+  using ConvKernel = typename kernel::DefaultConv<
     ElementIn,
     LayoutIn,
     kAlignmentA,
@@ -355,8 +355,7 @@ class Conv {
 private:
 
   /// Kernel parameters object
-  typename GemmKernelInner::Params params_inner_;
-  // typename GemmKernelOuter::Params params_outer_;
+  typename ConvKernel::Params params_;
 
 public:
 
@@ -457,7 +456,7 @@ public:
     // }
 
     // Initialize the Params structure
-    params_inner_ = typename GemmKernelInner::Params{
+    params_ = typename ConvKernel::Params{
       args.channels,
       GetProblemSize(args.matrix_size, args.channels, kInnerConv),
       grid_shape,
@@ -512,14 +511,14 @@ public:
 
     ThreadblockSwizzle threadblock_swizzle;
 
-    dim3 grid = threadblock_swizzle.get_grid_shape(params_inner_.grid_tiled_shape);
-    dim3 block(GemmKernelInner::kThreadCount, 1, 1);
+    dim3 grid = threadblock_swizzle.get_grid_shape(params_.grid_tiled_shape);
+    dim3 block(ConvKernel::kThreadCount, 1, 1);
 
     cudaError_t result;
 
-    int smem_size = int(sizeof(typename GemmKernelInner::SharedStorage));
+    int smem_size = int(sizeof(typename ConvKernel::SharedStorage));
     if (smem_size >= (48 << 10)) {
-      result = cudaFuncSetAttribute(Kernel<GemmKernelInner>,
+      result = cudaFuncSetAttribute(Kernel<ConvKernel>,
                                     cudaFuncAttributeMaxDynamicSharedMemorySize,
                                     smem_size);
 
@@ -528,7 +527,7 @@ public:
       }
 
       result = cudaFuncSetAttribute(
-          Kernel<GemmKernelInner>,
+          Kernel<ConvKernel>,
           cudaFuncAttributePreferredSharedMemoryCarveout, 100);
 
       if (result != cudaSuccess) {
@@ -536,7 +535,7 @@ public:
       }
     }
 
-    cutlass::Kernel<GemmKernelInner><<<grid, block, smem_size, stream>>>(params_inner_);
+    cutlass::Kernel<ConvKernel><<<grid, block, smem_size, stream>>>(params_);
 
     #if 1
     cudaEvent_t start, stop;
@@ -547,7 +546,7 @@ public:
 
 
     for (int i = 0; i < 100; i++) {
-      cutlass::Kernel<GemmKernelInner><<<grid, block, smem_size, stream>>>(params_inner_);
+      cutlass::Kernel<ConvKernel><<<grid, block, smem_size, stream>>>(params_);
     }
 
     cudaEventRecord(stop);
