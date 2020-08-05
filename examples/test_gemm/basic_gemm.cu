@@ -80,9 +80,9 @@ int print = 1;
 static constexpr int kWindowSize = 15;
 static constexpr bool kInnerConv = true;
 
-using A_type = int;
-using B_type = int;
-using C_type = int;
+using A_type = uint8_t;
+using B_type = cutlass::half_t;
+using C_type = float;
 
 /// Define a CUTLASS GEMM template and launch a GEMM kernel.
 template <bool InnerConv>
@@ -91,7 +91,7 @@ cudaError_t CutlassSgemmNN(
   int width,
   int channels,
   int window_size,
-  A_type alpha,
+  C_type alpha,
   A_type const *A,
   int lda,
   B_type const *window,
@@ -237,11 +237,11 @@ __global__ void InitializeMatrix_kernel(
       // T value = static_cast<T>(((offset + seed) * k % m) - m / 2); // TODO modulo something
       // T value = row * 100 + col;
 
-      // T value = static_cast<T>(0.f);
-      // if (row == col * channels + c)
-      //   value = static_cast<T>(1);
+      T value = static_cast<T>(0.f);
+      if (row == col * channels + c)
+        value = static_cast<T>(1);
 
-      matrix[offset] = static_cast<T>(1);
+      matrix[offset] = static_cast<T>(value);
 
     }
   }
@@ -390,7 +390,7 @@ __global__ void ReferenceGemm_kernel(
   int M,
   int N,
   int K,
-  A_type alpha,
+  C_type alpha,
   A_type const *A,
   int lda,
   B_type const *B,
@@ -406,7 +406,7 @@ __global__ void ReferenceGemm_kernel(
     C_type accumulator = static_cast<C_type>(0);
 
     for (int k = 0; k < K; ++k) {
-      accumulator += A[i * lda + k] * B[k * ldb + j];
+      accumulator += static_cast<C_type>(static_cast<B_type>(A[i * lda + k]) * B[k * ldb + j]);
     }
 
     C[i * ldc + j] = alpha * accumulator + beta * C[i * ldc + j];
@@ -418,7 +418,7 @@ cudaError_t ReferenceGemm(
   int M,
   int N,
   int K,
-  A_type alpha,
+  C_type alpha,
   A_type const *A,
   int lda,
   B_type const *B,
@@ -474,7 +474,7 @@ __global__ void ReferenceConv_kernel_inner(
   int width, // cols
   int channels,
   int radius,
-  A_type alpha,
+  C_type alpha,
   A_type const *A,
   int lda,
   B_type const *window,
@@ -490,7 +490,7 @@ __global__ void ReferenceConv_kernel_inner(
       C_type accumulator = static_cast<C_type>(0);
 
       for (int k = -radius; k <= radius; ++k) {
-        accumulator += A[row * lda + idx_reflect_101(col + k, width) * channels + c] * window[k];
+        accumulator += static_cast<C_type>(static_cast<B_type>(A[row * lda + idx_reflect_101(col + k, width) * channels + c]) * window[k]);
       }
 
       C[row * ldc + col * channels + c] = alpha * accumulator + beta * C[row * ldc + col * channels + c];
@@ -505,7 +505,7 @@ __global__ void ReferenceConv_kernel_outer(
   int width, // cols
   int channels,
   int radius,
-  A_type alpha,
+  C_type alpha,
   A_type const *A,
   int lda,
   B_type const *window,
@@ -520,7 +520,7 @@ __global__ void ReferenceConv_kernel_outer(
     C_type accumulator = static_cast<C_type>(0);
 
     for (int k = -radius; k <= radius; ++k) {
-      accumulator += A[idx_reflect_101(row + k, height) * lda + col] * window[k];
+      accumulator += static_cast<C_type>(static_cast<B_type>(A[idx_reflect_101(row + k, height) * lda + col]) * window[k]);
     }
 
     C[row * ldc + col] = alpha * accumulator + beta * C[row * ldc + col];
@@ -534,7 +534,7 @@ cudaError_t ReferenceConv(
   int width,
   int channels,
   int radius,
-  A_type alpha,
+  C_type alpha,
   A_type const *A,
   int lda,
   B_type const *window,
@@ -823,7 +823,7 @@ int main(int argc, const char *arg[]) {
   }
 
   // Scalars used for linear scaling the result of the matrix product.
-  A_type scalars[2] = {  static_cast<A_type>(1.f), static_cast<A_type>(0.f) }; //todo scalars assumed to have same type
+  C_type scalars[2] = {  static_cast<C_type>(1.f), static_cast<C_type>(0.f) }; //todo scalars assumed to have same type
 
   for (int i = 4; i < argc && i < 5; ++i) {
     std::stringstream ss(arg[i]);
