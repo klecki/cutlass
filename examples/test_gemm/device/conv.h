@@ -304,10 +304,10 @@ class Conv {
     //
     // GemmCoord problem_size;
     Array<int, kAxes> matrix_size;
-    Array<int, kAxes> window_sizes;
+    int window_size;
     int channels;
     TensorRef<ElementIn const, LayoutIn> ref_In;
-    Array<ElementWindow*, kAxes> ref_Windows;
+    ElementWindow* ref_Window;
     TensorRef<ElementOut const, LayoutOut> ref_C;
     TensorRef<ElementOut, LayoutOut> ref_D;
     typename EpilogueOutputOp::Params epilogue;
@@ -326,20 +326,20 @@ class Conv {
     CUTLASS_HOST_DEVICE
     Arguments(
       Array<int, kAxes> matrix_size_,
-      Array<int, kAxes> window_sizes_,
+      int window_size_,
       int channels_,
       TensorRef<ElementIn const, LayoutIn> ref_In_,
-      Array<ElementWindow*, kAxes> ref_Windows_,
+      ElementWindow* ref_Window_,
       TensorRef<ElementOut const, LayoutOut> ref_C_,
       TensorRef<ElementOut, LayoutOut> ref_D_,
       typename EpilogueOutputOp::Params epilogue_ =
         typename EpilogueOutputOp::Params()
     ):
       matrix_size(matrix_size_),
-      window_sizes(window_sizes_),
+      window_size(window_size_),
       channels(channels_),
       ref_In(ref_In_),
-      ref_Windows(ref_Windows_),
+      ref_Window(ref_Window_),
       ref_C(ref_C_),
       ref_D(ref_D_),
       epilogue(epilogue_){
@@ -456,26 +456,13 @@ public:
       GetProblemSize(args.matrix_size, args.channels, kInnerConv),
       grid_shape,
       args.ref_In.non_const_ref(),
-      {args.ref_Windows[1], {args.window_sizes[1]}}, // build window ref on the fly
+      {args.ref_Window, {args.window_size}}, // build window ref on the fly
       args.ref_C.non_const_ref(),
       args.ref_D,
       args.epilogue,
       static_cast<int *>(workspace)
     };
 
-    // params_outer_ = typename GemmKernelOuter::Params{
-    //   args.matrix_size,
-    //   args.window_sizes,
-    //   args.channels,
-    //   grid_shape,
-    //   args.ref_In.non_const_ref(),
-    //   // args.ref_In.non_const_ref(),
-    //   args.ref_Windows,
-    //   args.ref_C.non_const_ref(),
-    //   args.ref_D,
-    //   args.epilogue,
-    //   static_cast<int *>(workspace)
-    // };
 
     return Status::kSuccess;
   }

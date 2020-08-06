@@ -174,17 +174,12 @@ cudaError_t CutlassSgemmNN(
   cutlass::Array<int, 2> size;
   size[0] = height;
   size[1] = width;
-  cutlass::Array<int, 2> window_sizes;
-  cutlass::Array<B_type *, 2> windows;
-  for (int i = 0; i < 2; i++) {
-    window_sizes[i] = window_size;
-    windows[i] = const_cast<B_type*>(window); // TODO(klecki): passing non-const value, cause CUTLASS is using non-const refs due to RW iterators (even when only reading)
-  }
   typename CutlassConv::Arguments args(size,  // Input matrix dimensions
-                              window_sizes, // Window sizes
+                              window_size, // Window sizes
                               channels, // channels count (innermost)
                               {A, lda},    // Tensor-ref for source matrix A
-                              windows,    // Pointers to windows
+                              // TODO(klecki): passing non-const value, cause CUTLASS is using non-const refs due to RW iterators (even when only reading)
+                              const_cast<B_type*>(window),    // Pointers to windows
                               {C, ldc},    // Tensor-ref for source matrix C
                               {C, ldc},    // Tensor-ref for destination matrix D (may be different memory than source C matrix)
                               {alpha, beta}); // Scalars used in the Epilogue
