@@ -266,102 +266,7 @@ struct Conv {
     __syncthreads();
   }
 
-
-  /// For inner convolution, input is lhs and window-matrix is rhs
-  /// For outer convolution, it's the opposite: input is rhs, window-matrix is lhs
-
-  template <bool IsInnerConv>
-  CUTLASS_DEVICE
-  std::enable_if_t<IsInnerConv, typename Mma::IteratorA::Params> select_params_A(Params const &params) {
-    return params.params_In;
-  }
-
-  template <bool IsInnerConv>
-  CUTLASS_DEVICE
-  std::enable_if_t<!IsInnerConv, typename Mma::IteratorA::Params> select_params_A(Params const &params) {
-    return params.params_Window;
-  }
-
-  template <bool IsInnerConv>
-  CUTLASS_DEVICE
-  std::enable_if_t<IsInnerConv, typename Mma::IteratorB::Params> select_params_B(Params const &params) {
-    return params.params_Window;
-  }
-
-  template <bool IsInnerConv>
-  CUTLASS_DEVICE
-  std::enable_if_t<!IsInnerConv, typename Mma::IteratorB::Params> select_params_B(Params const &params) {
-    return params.params_In;
-  }
-
-
-  using ConvolutionIterator = std::conditional_t<kInnerConv, typename Mma::IteratorB, typename Mma::IteratorA>;
-
-  template <bool IsInnerConv>
-  std::enable_if_t<IsInnerConv, ConvolutionIterator&> select_conv_iterator(typename Mma::IteratorA &, typename Mma::IteratorB &iterator) {
-    return iterator;
-  }
-
-  template <bool IsInnerConv>
-  std::enable_if_t<!IsInnerConv, ConvolutionIterator&> select_conv_iterator(typename Mma::IteratorA &iterator, typename Mma::IteratorB &) {
-    return iterator;
-  }
-
-  template <bool IsInnerConv>
-  CUTLASS_DEVICE
-  typename Mma::IteratorA::Pointer select_data_A(void *in_data, void *window_data) {
-    if (IsInnerConv) {
-      return static_cast<typename Mma::IteratorA::Pointer>(in_data);
-    } else {
-      return static_cast<typename Mma::IteratorA::Pointer>(window_data);
-    }
-  }
-
-
-  template <bool IsInnerConv>
-  CUTLASS_DEVICE
-  typename Mma::IteratorB::Pointer select_data_B(void *in_data, void *window_data) {
-    if (IsInnerConv) {
-      return static_cast<typename Mma::IteratorB::Pointer>(window_data);
-    } else {
-      return static_cast<typename Mma::IteratorB::Pointer>(in_data);
-    }
-  }
-
-
-  CUTLASS_DEVICE
-  int count_skip_before(MatrixCoord const &logical_coord, int radius, MatrixCoord const &residue_offset) {
-    if (kInnerConv) {
-      int n = logical_coord.column();
-      // we're interested in tile (row, col): (n - radius, n) -- (n + Shape::kN, n + Shape::kN + radius)
-      int k_start = n - radius;
-      int skipped = 0;
-      if (k_start > residue_offset.row() && residue_offset.row() > 0) {
-        skipped++;
-        k_start -= residue_offset.row();
-      }
-      skipped += k_start / Mma::Shape::kK;
-      return skipped;
-    }
-    // return {0, 0};
-    return 0;
-  }
-
-  CUTLASS_DEVICE
-  int count_effective_iters(MatrixCoord const &logical_coord, int radius) {
-    if (kInnerConv) {
-      int n = logical_coord.column();
-      // we're interested in tile (row, col): (n - radius, n) -- (n + Shape::kN, n + Shape::kN + radius)
-      int k_start = n - radius;
-      int k_end = n + Mma::Shape::kN + radius;
-      int diff = k_end - k_start;
-      return (diff + Mma::Shape::kK - 1) / Mma::Shape::kK;
-    }
-    return 0;
-  }
-
-
-  /// Executes one GEMM
+   /// Executes one GEMM
   CUTLASS_DEVICE
   void operator()(Params const &params, SharedStorage &shared_storage) {
 
@@ -460,10 +365,8 @@ struct Conv {
     // Construct iterators to A and B operands
     // Global mem iterators
     typename Mma::IteratorA iterator_A(
-      // select_params_A<kInnerConv>(params),
       select_A<kInnerConv>(params.params_In, params.params_Window),
-      select_data_A<kInnerConv>(params.ref_In.data(), window_smem.data()),
-      // (kInnerConv ? static_cast<Mma::IteratorA::Pointer>(in_data) : static_cast<Mma::IteratorA::Pointer>(window_data)),
+      select_A<kInnerConv>(params.ref_In.data(), window_smem.data()),
       {params.problem_size.m(), problem_size_k},
       thread_idx,
       tb_offset_A);
@@ -471,12 +374,9 @@ struct Conv {
 
     typename Mma::IteratorB iterator_B(
       // Fake stride
-      select_params_B<kInnerConv>(params),
+      select_B<kInnerConv>(params.params_In, params.params_Window),
       // Pointer to the smem that would be sampled
-      select_data_B<kInnerConv>(params.ref_In.data(), window_smem.data()),
-      // (kInnerConv ? static_cast<Mma::IteratorA::Pointer>(window_data) : static_cast<Mma::IteratorA::Pointer>(in_data)),
-      // window_smem.data(),
-      // Emulated matrix shape
+      select_B<kInnerConv>(params.ref_In.data(), window_smem.data()),
       {problem_size_k, params.problem_size.n()},
       thread_idx,
       tb_offset_B);

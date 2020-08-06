@@ -78,11 +78,11 @@
 int print = 1;
 
 static constexpr int kWindowSize = 15;
-static constexpr bool kInnerConv = true;
+static constexpr bool kInnerConv = false;
 
-using A_type = uint8_t;
+using A_type = float;
 using B_type = cutlass::half_t;
-using C_type = int;
+using C_type = cutlass::half_t;
 
 /// Define a CUTLASS GEMM template and launch a GEMM kernel.
 template <bool InnerConv>
@@ -136,9 +136,9 @@ cudaError_t CutlassSgemmNN(
   using ShapeMMAOp = cutlass::gemm::GemmShape<8, 8, 4>;  // <- MMA Op tile M = 8, N = 8, K = 4
 
 
-  using CutlassConv = typename cutlass::gemm::device::Conv<A_type, float,        // Data-type of A matrix
+  using CutlassConv = typename cutlass::gemm::device::Conv<A_type, cutlass::half_t,        // Data-type of A matrix
                                                   RowMajor,  // Layout of A matrix
-                                                  B_type, float,        // Data-type of B matrix
+                                                  B_type, cutlass::half_t,        // Data-type of B matrix
                                                   C_type,        // Data-type of C matrix
                                                   RowMajor, 2, kInnerConv>; // Layout of C matrix
 
@@ -578,7 +578,7 @@ void print_mat(int rows, int cols, const std::vector<T> &mat, int max_rows = -1,
 
 /// Allocate several matrices in GPU device memory and call a single-precision
 /// CUTLASS GEMM kernel.
-cudaError_t TestCutlassConv(int height, int width, int channels, A_type alpha, C_type beta, bool innerConv) {
+cudaError_t TestCutlassConv(int height, int width, int channels, C_type alpha, C_type beta, bool innerConv) {
   int M = height;
   int N = width * channels;
   int K = innerConv ? width * channels : height;
@@ -785,7 +785,7 @@ cudaError_t TestCutlassConv(int height, int width, int channels, A_type alpha, C
       for (int col = 0; col < N; col++) {
         if (host_cutlass[row * ldc + col] != host_reference[row * ldc + col]) {
           std::cerr << "CUTLASS results incorrect: (" << row << ", " << col << "): "
-            << static_cast<C_type>(host_cutlass[row * ldc + col]) << " != " << static_cast<C_type>(host_reference[row * ldc + col]) << std::endl;
+            << static_cast<float>(host_cutlass[row * ldc + col]) << " != " << static_cast<float>(host_reference[row * ldc + col]) << std::endl;
             return cudaErrorUnknown;
         }
       }
@@ -837,7 +837,7 @@ int main(int argc, const char *arg[]) {
   cudaError_t result = TestCutlassConv(
     problem[0],     // GEMM M dimension - height
     problem[1],     // GEMM N dimension - width
-    1,
+    3,
     scalars[0],     // alpha
     scalars[1],     // beta
     kInnerConv // outer conv

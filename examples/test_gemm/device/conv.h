@@ -41,6 +41,8 @@
 #include "kernel/default_conv.h"
 #include "device/default_conv_configuration.h"
 
+#include "dali/utility.h"
+
 ////////////////////////////////////////////////////////////////////////////////
 
 namespace cutlass {
@@ -183,42 +185,51 @@ template <
     /// Tag indicating architecture to tune for
     typename ArchTag_ = arch::Sm70,
     /// Threadblock-level tile size (concept: GemmShape)
-    typename ThreadblockShape_ = typename DefaultConvConfiguration<
-        OperatorClass_, ArchTag_, ElementIn_, ElementWindow_, ElementOut_,
-        ElementAccumulator_>::ThreadblockShape,
+    typename ThreadblockShape_ = typename DefaultConvConfiguration<OperatorClass_, ArchTag_,
+        // TODO(klecki): ElementIn_ or ElementCastIn_?
+        select_A_t<InnerConv, ElementIn_, ElementWindow_>,
+        select_B_t<InnerConv, ElementIn_, ElementWindow_>,
+        ElementOut_, ElementAccumulator_>::ThreadblockShape,
     /// Warp-level tile size (concept: GemmShape)
-    typename WarpShape_ = typename DefaultConvConfiguration<
-        OperatorClass_, ArchTag_, ElementIn_, ElementWindow_, ElementOut_,
-        ElementAccumulator_>::WarpShape,
+    typename WarpShape_ = typename DefaultConvConfiguration<OperatorClass_, ArchTag_,
+        select_A_t<InnerConv, ElementIn_, ElementWindow_>,
+        select_B_t<InnerConv, ElementIn_, ElementWindow_>,
+        ElementOut_, ElementAccumulator_>::WarpShape,
     /// Instruction-level tile size (concept: GemmShape)
-    typename InstructionShape_ = typename DefaultConvConfiguration<
-        OperatorClass_, ArchTag_, ElementIn_, ElementWindow_, ElementOut_,
-        ElementAccumulator_>::InstructionShape,
+    typename InstructionShape_ = typename DefaultConvConfiguration<OperatorClass_, ArchTag_,
+        select_A_t<InnerConv, ElementIn_, ElementWindow_>,
+        select_B_t<InnerConv, ElementIn_, ElementWindow_>,
+        ElementOut_, ElementAccumulator_>::InstructionShape,
     /// Epilogue output operator
-    typename EpilogueOutputOp_ = typename DefaultConvConfiguration<
-        OperatorClass_, ArchTag_, ElementIn_, ElementWindow_, ElementOut_,
-        ElementAccumulator_>::EpilogueOutputOp,
+    typename EpilogueOutputOp_ = typename DefaultConvConfiguration<OperatorClass_, ArchTag_,
+        select_A_t<InnerConv, ElementIn_, ElementWindow_>,
+        select_B_t<InnerConv, ElementIn_, ElementWindow_>,
+        ElementOut_, ElementAccumulator_>::EpilogueOutputOp,
     /// Threadblock-level swizzling operator
     typename ThreadblockSwizzle_ =
         typename threadblock::GemmIdentityThreadblockSwizzle<>,
     /// Number of stages used in the pipelined mainloop
-    int Stages =
-        DefaultConvConfiguration<OperatorClass_, ArchTag_, ElementIn_, ElementWindow_,
-                                 ElementOut_, ElementAccumulator_>::kStages,
+    int Stages = DefaultConvConfiguration<OperatorClass_, ArchTag_,
+        select_A_t<InnerConv, ElementIn_, ElementWindow_>,
+        select_B_t<InnerConv, ElementIn_, ElementWindow_>,
+        ElementOut_, ElementAccumulator_>::kStages,
     /// Access granularity of A matrix in units of elements
-    int AlignmentA =
-        DefaultConvConfiguration<OperatorClass_, ArchTag_, ElementIn_, ElementWindow_,
-                                 ElementOut_, ElementAccumulator_>::kAlignmentA,
+    int AlignmentA = DefaultConvConfiguration<OperatorClass_, ArchTag_,
+        select_A_t<InnerConv, ElementIn_, ElementWindow_>,
+        select_B_t<InnerConv, ElementIn_, ElementWindow_>,
+        ElementOut_, ElementAccumulator_>::kAlignmentA,
     /// Access granularity of B matrix in units of elements
-    int AlignmentB =
-        DefaultConvConfiguration<OperatorClass_, ArchTag_, ElementIn_, ElementWindow_,
-                                 ElementOut_, ElementAccumulator_>::kAlignmentB,
+    int AlignmentB = DefaultConvConfiguration<OperatorClass_, ArchTag_,
+        select_A_t<InnerConv, ElementIn_, ElementWindow_>,
+        select_B_t<InnerConv, ElementIn_, ElementWindow_>,
+        ElementOut_, ElementAccumulator_>::kAlignmentB,
     /// If true, kernel supports split-K with serial reduction
     bool SplitKSerial = false,
     /// Operation performed by GEMM
-    typename Operator_ = typename DefaultConvConfiguration<
-        OperatorClass_, ArchTag_, ElementIn_, ElementWindow_, ElementOut_,
-        ElementAccumulator_>::Operator,
+    typename Operator_ = typename DefaultConvConfiguration<OperatorClass_, ArchTag_,
+        select_A_t<InnerConv, ElementIn_, ElementWindow_>,
+        select_B_t<InnerConv, ElementIn_, ElementWindow_>,
+        ElementOut_, ElementAccumulator_>::Operator,
     /// Whether Beta is zero or not
     bool IsBetaZero = false>
 class Conv {
@@ -227,11 +238,11 @@ class Conv {
   using ElementIn = ElementIn_;
   using ElementCastIn = ElementCastIn_;
   using LayoutIn = LayoutIn_;
-  using TensorRefA = TensorRef<ElementIn const, LayoutIn>;
+  // using TensorRefA = TensorRef<ElementIn const, LayoutIn>;
   using ElementWindow = ElementWindow_;
   using ElementCastWindow = ElementCastWindow_;
-  using LayoutWindow = layout::RowMajor; // TODO(klecki): placeholder
-  using TensorRefB = TensorRef<ElementWindow const, LayoutWindow>;
+  using LayoutWindow = layout::RowMajor; // placeholder
+  // using TensorRefB = TensorRef<ElementWindow const, LayoutWindow>;
   using ElementOut = ElementOut_;
   using LayoutOut = LayoutOut_;
   using TensorRefC = TensorRef<ElementOut const, LayoutOut>;
@@ -260,12 +271,12 @@ class Conv {
 
   /// Define the kernel, SIMT
   using ConvKernel = typename kernel::DefaultConv<
-    ElementIn,
-    ElementCastIn,
+    select_A_t<InnerConv, ElementIn_, ElementWindow_>,
+    select_A_t<InnerConv, ElementCastIn_, ElementCastWindow_>,
     LayoutIn,
     kAlignmentA,
-    ElementWindow,
-    ElementCastWindow,
+    select_B_t<InnerConv, ElementIn_, ElementWindow_>,
+    select_B_t<InnerConv, ElementCastIn_, ElementCastWindow_>,
     LayoutWindow,
     kAlignmentB,
     ElementOut,

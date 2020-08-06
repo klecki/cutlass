@@ -107,23 +107,6 @@ public:
   using IteratorIn = std::conditional_t<kInnerConv, IteratorA, IteratorB>;  ///< Input operand in global memory
   using IteratorWindow = std::conditional_t<kInnerConv, IteratorB, IteratorA>;  ///< Window Matrix generated on the fly
 
-
-  // using ConvolutionIterator = std::conditional_t<kInnerConv, typename Mma::IteratorB, typename Mma::IteratorA>;
-
-  template <bool IsInnerConv>
-  CUTLASS_DEVICE
-  std::enable_if_t<IsInnerConv, IteratorWindow&> select_conv_iterator(IteratorA &, IteratorB &iterator) {
-    return iterator;
-  }
-
-  template <bool IsInnerConv>
-  CUTLASS_DEVICE
-  std::enable_if_t<!IsInnerConv, IteratorWindow&> select_conv_iterator(IteratorA &iterator, IteratorB &) {
-    return iterator;
-  }
-
-
-
   using ElementC = ElementC_;       ///< Data type of accumulator matrix
   using LayoutC = LayoutC_;         ///< Layout of accumulator matrix
   using Policy = Policy_;           ///< Policy describing tuning details
