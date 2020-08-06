@@ -81,8 +81,8 @@ static constexpr int kWindowSize = 15;
 static constexpr bool kInnerConv = true;
 
 using A_type = uint8_t;
-using B_type = uint8_t;
-using C_type = float;
+using B_type = cutlass::half_t;
+using C_type = int;
 
 /// Define a CUTLASS GEMM template and launch a GEMM kernel.
 template <bool InnerConv>
@@ -136,9 +136,9 @@ cudaError_t CutlassSgemmNN(
   using ShapeMMAOp = cutlass::gemm::GemmShape<8, 8, 4>;  // <- MMA Op tile M = 8, N = 8, K = 4
 
 
-  using CutlassConv = typename cutlass::gemm::device::Conv<A_type, A_type,        // Data-type of A matrix
+  using CutlassConv = typename cutlass::gemm::device::Conv<A_type, float,        // Data-type of A matrix
                                                   RowMajor,  // Layout of A matrix
-                                                  B_type, B_type,        // Data-type of B matrix
+                                                  B_type, float,        // Data-type of B matrix
                                                   C_type,        // Data-type of C matrix
                                                   RowMajor, 2, kInnerConv>; // Layout of C matrix
 

@@ -60,14 +60,18 @@ namespace threadblock {
 /// Redirects the appropriate iterators to IteratorA (default for InnerConv)
 ///  and IteratorB (default for !InnerConv)
 template <
-    /// Element type for A matrix operand
+    /// Element type for A matrix operand (input in Gmem)
     typename ElementA,
+    /// Element type for A matrix operand for computation
+    typename ElementCastA,
     /// Layout type for A matrix operand
     typename LayoutA,
     /// Access granularity of A matrix in units of elements
     int kAlignmentA,
-    /// Element type for B matrix operand
+    /// Element type for B matrix operand (input in Gmem)
     typename ElementB,
+    /// Element type for B matrix operand for computation
+    typename ElementCastB,
     /// Layout type for B matrix operand
     typename LayoutB,
     /// Access granularity of B matrix in units of elements
@@ -106,7 +110,8 @@ struct SpecializedConvMma {
 
   // Select SMEM iterators that use ElementAccumulator type as storage (and computation)
   // instead of ElementA and ElementB
-  using UnderlyingMmaProcessing = DefaultMma<int16_t, LayoutA, kAlignmentA, int32_t, LayoutB, kAlignmentB,
+  using UnderlyingMmaProcessing = DefaultMma<
+        ElementCastA, LayoutA, kAlignmentA, ElementCastB, LayoutB, kAlignmentB,
 				ElementAccumulator, LayoutC, OperatorClass, ArchTag, ThreadblockShape, WarpShape,
 				InstructionShape, Stages, Operator, AccumulatorsInRowMajor>;
 

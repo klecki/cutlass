@@ -44,6 +44,8 @@
 
 #include "cutlass/util/device_dump.h"
 
+#include "dali/utility.h"
+
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
 namespace cutlass {
@@ -458,7 +460,8 @@ struct Conv {
     // Construct iterators to A and B operands
     // Global mem iterators
     typename Mma::IteratorA iterator_A(
-      select_params_A<kInnerConv>(params),
+      // select_params_A<kInnerConv>(params),
+      select_A<kInnerConv>(params.params_In, params.params_Window),
       select_data_A<kInnerConv>(params.ref_In.data(), window_smem.data()),
       // (kInnerConv ? static_cast<Mma::IteratorA::Pointer>(in_data) : static_cast<Mma::IteratorA::Pointer>(window_data)),
       {params.problem_size.m(), problem_size_k},

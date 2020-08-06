@@ -143,7 +143,7 @@ struct DefaultConv {
       Operator,
       IsBetaZero>;
   using Mma = typename cutlass::gemm::threadblock::SpecializedConvMma<
-      ElementA, LayoutA, kAlignmentA, ElementB, LayoutB, kAlignmentB,
+      ElementA, ElementCastA, LayoutA, kAlignmentA, ElementB, ElementCastB, LayoutB, kAlignmentB,
       ElementAccumulator, LayoutC, OperatorClass, ArchTag,
       ThreadblockShape, WarpShape, InstructionShape, Stages,
       Operator, IsBetaZero, InnerConv>::ThreadblockMma;
