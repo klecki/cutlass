@@ -174,7 +174,9 @@ cudaError_t CutlassSgemmNN(
   cutlass::Array<int, 2> size;
   size[0] = height;
   size[1] = width;
-  typename CutlassConv::Arguments args(size,  // Input matrix dimensions
+  typename CutlassConv::Arguments args;
+
+  typename CutlassConv::SampleArguments sample_arg(size,  // Input matrix dimensions
                               window_size, // Window sizes
                               channels, // channels count (innermost)
                               {A, lda},    // Tensor-ref for source matrix A
@@ -183,6 +185,10 @@ cudaError_t CutlassSgemmNN(
                               {C, ldc},    // Tensor-ref for source matrix C
                               {C, ldc},    // Tensor-ref for destination matrix D (may be different memory than source C matrix)
                               {alpha, beta}); // Scalars used in the Epilogue
+  args.push_back(sample_arg);
+  args.push_back(sample_arg);
+  args.push_back(sample_arg);
+  args.push_back(sample_arg);
 
   //
   // Launch the CUTLASS GEMM kernel.

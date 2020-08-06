@@ -83,7 +83,7 @@ struct Conv {
   static int const kThreadCount = 32 * WarpCount::kCount;
 
   /// Parameters structure
-  struct Params {
+  struct SampleParams {
     int channels;
     int window_size;
     cutlass::gemm::GemmCoord problem_size;
@@ -97,7 +97,7 @@ struct Conv {
     typename Epilogue::OutputTileIterator::Params params_D;
     typename Epilogue::OutputTileIterator::TensorRef ref_D;
     typename OutputOp::Params output_op;
-    int *semaphore;
+    int *semaphore; // TODO(klecki): add some handling for generating per sample semaphore?
     int gemm_k_iterations; // TODO(klecki): LOL, this is not set
     int gemm_k_size;
 
@@ -106,10 +106,10 @@ struct Conv {
     //
 
     CUTLASS_HOST_DEVICE
-    Params(): semaphore(0) {} //, gemm_k_iterations(0), gemm_k_size(0) { }
+    SampleParams(): semaphore(0) {} //, gemm_k_iterations(0), gemm_k_size(0) { }
 
     CUTLASS_HOST_DEVICE
-    Params(
+    SampleParams(
       int channels,
       cutlass::gemm::GemmCoord const & problem_size,
       cutlass::gemm::GemmCoord const & grid_tiled_shape,
@@ -152,6 +152,13 @@ struct Conv {
     }
 
   };
+
+  using HostParams = std::vector<SampleParams>;
+  struct Params {
+    int sample_count;
+    SampleParams *params;
+  };
+
 
   /// Shared memory storage structure
   union SharedStorage {
@@ -206,7 +213,8 @@ struct Conv {
   }
 
   CUTLASS_DEVICE
-  void transfer_conv_window(Params const &params, typename Mma::TensorRefWindow &window_smem) {
+  void transfer_conv_window(Params const &params_vec, typename Mma::TensorRefWindow &window_smem) {
+    SampleParams const &params = params_vec.params[0]; // TODO(klecki): temp for compilation
 
     ////////////
     //  Copy the window from global mem to smem for matrix bulding lookups
@@ -268,7 +276,8 @@ struct Conv {
 
    /// Executes one GEMM
   CUTLASS_DEVICE
-  void operator()(Params const &params, SharedStorage &shared_storage) {
+  void operator()(Params const &params_vec, SharedStorage &shared_storage) {
+    SampleParams const &params = params_vec.params[0]; // TODO(klecki): temp for compilation
 
     // Compute threadblock location
     ThreadblockSwizzle threadblock_swizzle;
@@ -347,7 +356,7 @@ struct Conv {
 
     auto window_smem = shared_storage.main_loop.operand_Window_ref(params.window_size);
     // Transfer window from gmem to smem <- this is cheap (klecki)
-    transfer_conv_window(params, window_smem);
+    transfer_conv_window(params_vec, window_smem);
 
 
 

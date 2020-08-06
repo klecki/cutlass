@@ -297,7 +297,7 @@ class Conv {
   >::GemmKernel;
 
   /// Argument structure
-  struct Arguments {
+  struct SampleArguments {
 
     //
     // Data members
@@ -324,7 +324,7 @@ class Conv {
 
     /// Constructs an Arguments structure
     CUTLASS_HOST_DEVICE
-    Arguments(
+    SampleArguments(
       Array<int, kAxes> matrix_size_,
       int window_size_,
       int channels_,
@@ -347,10 +347,18 @@ class Conv {
     }
   };
 
+  using Arguments = std::vector<SampleArguments>;
+  // struct Arguments {
+  //   int sample_count;
+  //   SampleArguments *host_samples;
+  //   SampleArguments *dev_samples;
+  // };
+
 private:
 
   /// Kernel parameters object
   typename ConvKernel::Params params_;
+  typename ConvKernel::HostParams host_params_;
 
 public:
 
@@ -364,15 +372,16 @@ public:
     if (!kSplitKSerial && split_k_slices > 1) {
       return Status::kErrorInvalidProblem;
     }
-
-    //TODO(klecki): fixup
-    // Status status = GemmKernel::can_implement(
-    //   args.problem_size,
-    //   args.ref_In.non_const_ref(),
-    //   args.ref_Windows.non_const_ref(),
-    //   args.ref_C.non_const_ref(),
-    //   args.ref_D
-    // );
+    // for (int i = 0; i < args.sample_count; i++) {
+    //   //TODO(klecki): fixup for args.host_samples[i]
+    //   // Status status = GemmKernel::can_implement(
+    //   //   args.problem_size,
+    //   //   args.ref_In.non_const_ref(),
+    //   //   args.ref_Windows.non_const_ref(),
+    //   //   args.ref_C.non_const_ref(),
+    //   //   args.ref_D
+    //   // );
+    // }
 
     // if (status != Status::kSuccess) {
     //   return status;
@@ -416,14 +425,22 @@ public:
 
     // The basic threadblock swizzle takes only M and N dims into account here
     int dummy_k = 1;
-    GemmCoord problem_size(args.matrix_size[0], args.matrix_size[1] * args.channels, dummy_k);
+    // GemmCoord problem_size(args.matrix_size[0], args.matrix_size[1] * args.channels, dummy_k);
+    GemmCoord max_problem_size(0, 0, 1);
+    for (auto &arg : args) {
+      GemmCoord sample_size(arg.matrix_size[0], arg.matrix_size[1] * arg.channels, dummy_k);
+      GemmCoord tmp(std::max(max_problem_size.m(), sample_size.m()),
+          std::max(max_problem_size.n(), sample_size.n()),
+          std::max(max_problem_size.k(), sample_size.k()));
+      max_problem_size = tmp;
+    }
     cutlass::gemm::GemmCoord grid_shape = threadblock_swizzle.get_tiled_shape(
-      problem_size,
+      max_problem_size,
       {ThreadblockShape::kM, ThreadblockShape::kN, ThreadblockShape::kK},
       split_k_slices);
 
     printf(">> initialize:\nProblem Size: (%d, %d, %d), block (%d, %d, %d), k_slices: %d -> grid_shape (%d, %d, %d)\n",
-       problem_size.m(), problem_size.n(), problem_size.k(),
+       max_problem_size.m(), max_problem_size.n(), max_problem_size.k(),
        ThreadblockShape::kM, ThreadblockShape::kN, ThreadblockShape::kK,
        split_k_slices,
        grid_shape.m(), grid_shape.n(), grid_shape.k());
@@ -451,17 +468,19 @@ public:
     // }
 
     // Initialize the Params structure
-    params_ = typename ConvKernel::Params{
-      args.channels,
-      GetProblemSize(args.matrix_size, args.channels, kInnerConv),
-      grid_shape,
-      args.ref_In.non_const_ref(),
-      {args.ref_Window, {args.window_size}}, // build window ref on the fly
-      args.ref_C.non_const_ref(),
-      args.ref_D,
-      args.epilogue,
-      static_cast<int *>(workspace)
-    };
+    for (auto &arg : args) {
+      host_params_.push_back(typename ConvKernel::SampleParams{
+        arg.channels,
+        GetProblemSize(arg.matrix_size, arg.channels, kInnerConv),
+        grid_shape,
+        arg.ref_In.non_const_ref(),
+        {arg.ref_Window, {arg.window_size}}, // build window ref on the fly
+        arg.ref_C.non_const_ref(),
+        arg.ref_D,
+        arg.epilogue,
+        static_cast<int *>(workspace)
+      });
+    }
 
 
     return Status::kSuccess;
@@ -493,7 +512,8 @@ public:
 
     ThreadblockSwizzle threadblock_swizzle;
 
-    dim3 grid = threadblock_swizzle.get_grid_shape(params_.grid_tiled_shape);
+    // TODO(klecki): it's all the same, but maybe it's worth to keep it as value in the params_
+    dim3 grid = threadblock_swizzle.get_grid_shape(host_params_[0].grid_tiled_shape);
     dim3 block(ConvKernel::kThreadCount, 1, 1);
 
     cudaError_t result;
@@ -516,6 +536,10 @@ public:
         return Status::kErrorInternal;
       }
     }
+
+    size_t params_sizeof = host_params_.size() * sizeof(typename ConvKernel::SampleParams);
+    cudaMalloc(&params_.params, params_sizeof);
+    cudaMemcpyAsync(params_.params, host_params_.data(), params_sizeof, cudaMemcpyHostToDevice, stream);
 
     cutlass::Kernel<ConvKernel><<<grid, block, smem_size, stream>>>(params_);
 
