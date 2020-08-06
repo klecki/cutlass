@@ -449,19 +449,17 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
     int dist_first = 0;
     // Distance from last row/column for inner/outer convolution
     int dist_last = 0;
+    int row = current_coord.strided(); // row
+    int col = current_coord.contiguous(); // col
+    int height = address_iterator_.get_extent().strided();
+    int width = address_iterator_.get_extent().contiguous();
     if (kInnerConv) {
       // we generate matrix by placing windows vertically, so the row is the major coordinate
-      int row = current_coord.strided(); // row
-      int col = current_coord.contiguous(); // col
-      int height = address_iterator_.get_extent().strided();
       dist_diag = row - col; // negative above coordinate
       dist_first = row;
       dist_last = height - 1 - row;
     } else {
       // we generate matrix by placing windows horizontally and there is no channel-based spacing
-      int row = current_coord.strided(); // row
-      int col = current_coord.contiguous(); // col
-      int width = address_iterator_.get_extent().contiguous();
       dist_diag = col - row;
       dist_first = col;
       dist_last = width - 1 - col;
@@ -481,6 +479,12 @@ class PositionPredicatedTileIterator<Shape_, Element_, layout::PitchLinear, Adva
         frag_ptr[idx][i] = static_cast<Element>(0);
       }
     }
+
+    // AccessType dst;
+    // for (int i = 0; i < AccessSize; i++) {
+    //   dst[i] = static_cast<Element>(col);
+    // }
+    // frag_ptr[idx] = dst;
   }
 
   CUTLASS_DEVICE

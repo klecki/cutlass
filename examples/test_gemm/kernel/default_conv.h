@@ -78,14 +78,18 @@ namespace kernel {
 ////////////////////////////////////////////////////////////////////////////////
 
 template <
-    /// Element type for A matrix operand
+    /// Element type for A matrix operand (input in Gmem)
     typename ElementA,
+    /// Element type for A matrix operand for computation
+    typename ElementCastA,
     /// Layout type for A matrix operand
     typename LayoutA,
     /// Access granularity of A matrix in units of elements
     int kAlignmentA,
-    /// Element type for B matrix operand
+    /// Element type for B matrix operand (input in Gmem)
     typename ElementB,
+    /// Element type for B matrix operand for computation
+    typename ElementCastB,
     /// Layout type for B matrix operand
     typename LayoutB,
     /// Access granularity of B matrix in units of elements
@@ -123,8 +127,8 @@ template <
     bool InnerConv = true>
 struct DefaultConv {
   using UnderlyingConv = DefaultGemm<
-      ElementA, LayoutA, kAlignmentA,
-      ElementB, LayoutB, kAlignmentB,
+      ElementCastA, LayoutA, kAlignmentA,
+      ElementCastB, LayoutB, kAlignmentB,
       ElementC, layout::RowMajor,
       ElementAccumulator,
       OperatorClass,

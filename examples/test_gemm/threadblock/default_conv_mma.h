@@ -99,14 +99,14 @@ template <
 struct SpecializedConvMma {
   // TODO(klecki): HERE WE CAN SET SOME OTHER TYPES???
 
-  using UnderlyingMma = DefaultMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB, kAlignmentB,
-				ElementAccumulator, LayoutC, OperatorClass, ArchTag, ThreadblockShape, WarpShape,
-				InstructionShape, Stages, Operator, AccumulatorsInRowMajor>;
+  // using UnderlyingMma = DefaultMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB, kAlignmentB,
+	// 			ElementAccumulator, LayoutC, OperatorClass, ArchTag, ThreadblockShape, WarpShape,
+	// 			InstructionShape, Stages, Operator, AccumulatorsInRowMajor>;
 
 
   // Select SMEM iterators that use ElementAccumulator type as storage (and computation)
   // instead of ElementA and ElementB
-  using UnderlyingMmaProcessing = DefaultMma<float, LayoutA, kAlignmentA, float, LayoutB, kAlignmentB,
+  using UnderlyingMmaProcessing = DefaultMma<int16_t, LayoutA, kAlignmentA, int32_t, LayoutB, kAlignmentB,
 				ElementAccumulator, LayoutC, OperatorClass, ArchTag, ThreadblockShape, WarpShape,
 				InstructionShape, Stages, Operator, AccumulatorsInRowMajor>;
 
@@ -121,17 +121,25 @@ struct SpecializedConvMma {
           cutlass::MatrixShape<MmaCore::Shape::kM, MmaCore::Shape::kK>,
           ElementA, LayoutA, 1, typename MmaCore::IteratorThreadMapA, kAlignmentA>;
 
+  using IteratorA_regular = cutlass::transform::threadblock::PredicatedTileIterator<
+          cutlass::MatrixShape<MmaCore::Shape::kM, MmaCore::Shape::kK>,
+          ElementA, LayoutA, 1, typename MmaCore::IteratorThreadMapA, kAlignmentA>;
+
 	using IteratorB_inner_conv_smem_ =
       cutlass::transform::threadblock::PositionPredicatedTileIterator<
           cutlass::MatrixShape<MmaCore::Shape::kK, MmaCore::Shape::kN>,
           ElementB, LayoutB, 0, typename MmaCore::IteratorThreadMapB, kAlignmentB>;
 
+  using IteratorB_regular =
+      cutlass::transform::threadblock::PredicatedTileIterator<
+          cutlass::MatrixShape<MmaCore::Shape::kK, MmaCore::Shape::kN>,
+          ElementB, LayoutB, 0, typename MmaCore::IteratorThreadMapB, kAlignmentB>;
 
   // Define iterators over tiles from the B operand
-  using IteratorA = std::conditional_t<kInnerConv, typename UnderlyingMma::IteratorA, IteratorA_outer_conv_smem_>;
+  using IteratorA = std::conditional_t<kInnerConv, IteratorA_regular, IteratorA_outer_conv_smem_>;
 
   // Define iterators over tiles from the B operand
-  using IteratorB = std::conditional_t<kInnerConv, IteratorB_inner_conv_smem_, typename UnderlyingMma::IteratorB>;
+  using IteratorB = std::conditional_t<kInnerConv, IteratorB_inner_conv_smem_, IteratorB_regular>;
 
 	// We pass here all the iterators and there is the actual impl of load GMEM->SMEM happening
 	// Overwrite the one from UnderlyingMma

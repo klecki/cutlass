@@ -161,10 +161,14 @@ namespace device {
 template <
     /// Element type for input matrix operand
     typename ElementIn_,
+    /// Element type for input matrix operand
+    typename ElementCastIn_,
     /// Layout type for input matrix operand
     typename LayoutIn_,
     /// Element type for window operands
     typename ElementWindow_,
+    /// Element type for window operands
+    typename ElementCastWindow_,
     /// Element type for C and D matrix operands
     typename ElementOut_,
     /// Layout type for C and D matrix operands
@@ -221,9 +225,11 @@ class Conv {
  public:
 
   using ElementIn = ElementIn_;
+  using ElementCastIn = ElementCastIn_;
   using LayoutIn = LayoutIn_;
   using TensorRefA = TensorRef<ElementIn const, LayoutIn>;
   using ElementWindow = ElementWindow_;
+  using ElementCastWindow = ElementCastWindow_;
   using LayoutWindow = layout::RowMajor; // TODO(klecki): placeholder
   using TensorRefB = TensorRef<ElementWindow const, LayoutWindow>;
   using ElementOut = ElementOut_;
@@ -255,9 +261,11 @@ class Conv {
   /// Define the kernel, SIMT
   using ConvKernel = typename kernel::DefaultConv<
     ElementIn,
+    ElementCastIn,
     LayoutIn,
     kAlignmentA,
     ElementWindow,
+    ElementCastWindow,
     LayoutWindow,
     kAlignmentB,
     ElementOut,
