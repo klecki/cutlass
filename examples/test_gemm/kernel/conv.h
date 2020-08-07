@@ -219,9 +219,7 @@ struct Conv {
   }
 
   CUTLASS_DEVICE
-  void transfer_conv_window(Params const &params_vec, typename Mma::TensorRefWindow &window_smem) {
-    SampleParams const &params = params_vec.params[0]; // TODO(klecki): temp for compilation
-
+  void transfer_conv_window(SampleParams const &params, typename Mma::TensorRefWindow &window_smem) {
     ////////////
     //  Copy the window from global mem to smem for matrix bulding lookups
     // Load from params.ref_conv_Window to shared_storage.main_loop.operand_Window
@@ -283,12 +281,16 @@ struct Conv {
    /// Executes one GEMM
   CUTLASS_DEVICE
   void operator()(Params const &params_vec, SharedStorage &shared_storage) {
-    SampleParams const &params = params_vec.params[0]; // TODO(klecki): temp for compilation
 
     // Compute threadblock location
     ThreadblockSwizzle threadblock_swizzle;
 
     cutlass::gemm::GemmCoord threadblock_tile_offset = threadblock_swizzle.get_tile_offset();
+
+    int sample_idx = threadblock_tile_offset.k();
+
+    SampleParams const &params = params_vec.params[sample_idx];
+
     // todo(klecki): here we know the actual tile!!! (global tile)
     PRINT_IF
       printf("kernel::Conv::operator() threadIdx: (%d, %d, %d), threadblock_tile_offset mnk:(%d, %d, %d), params.sample_grid_tiled_shape: (%d, %d, %d), params_vec.grid_tiled_shape: (%d, %d, %d) \n",
@@ -363,7 +365,7 @@ struct Conv {
 
     auto window_smem = shared_storage.main_loop.operand_Window_ref(params.window_size);
     // Transfer window from gmem to smem <- this is cheap (klecki)
-    transfer_conv_window(params_vec, window_smem);
+    transfer_conv_window(params, window_smem);
 
 
 
@@ -445,7 +447,7 @@ struct Conv {
 
     // If performing a reduction via split-K, fetch the initial synchronization
     // TODO(klecki): assume k == 1
-    // if (kSplitKSerial && params.grid_tiled_shape.k() > 1) {
+    // if (kSplitKSerial && params.sample_grid_tiled_shape.k() > 1) {
 
     //   // Fetch the synchronization lock initially but do not block.
     //   semaphore.fetch();
@@ -480,7 +482,7 @@ struct Conv {
 
     // Wait on the semaphore - this latency may have been covered by iterator construction
     // TODO(klecki): assume k == 1
-    // if (kSplitKSerial && params.grid_tiled_shape.k() > 1) {
+    // if (kSplitKSerial && params.sample_grid_tiled_shape.k() > 1) {
 
     //   // For subsequent threadblocks, the source matrix is held in the 'D' tensor.
     //   if (threadblock_tile_offset.k()) {
@@ -500,10 +502,10 @@ struct Conv {
     //
 
     // TODO(klecki): assume k == 1
-    // if (kSplitKSerial && params.grid_tiled_shape.k() > 1) {
+    // if (kSplitKSerial && params.sample_grid_tiled_shape.k() > 1) {
 
     //   int lock = 0;
-    //   if (params.grid_tiled_shape.k() == threadblock_tile_offset.k() + 1) {
+    //   if (params.sample_grid_tiled_shape.k() == threadblock_tile_offset.k() + 1) {
 
     //     // The final threadblock resets the semaphore for subsequent grids.
     //     lock = 0;

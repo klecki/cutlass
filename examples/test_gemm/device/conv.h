@@ -440,6 +440,7 @@ public:
       split_k_slices);
 
     assert(grid_shape.k() == 1);
+    // Assign the number of samples to gridDim.z
     grid_shape[2] = args.size();
 
     printf(">> initialize:\nProblem Size: (%d, %d, %d), block (%d, %d, %d), k_slices: %d -> grid_shape (%d, %d, %d)\n",
@@ -523,7 +524,7 @@ public:
 
     // TODO(klecki): it's all the same, but maybe it's worth to keep it as value in the params_
     dim3 grid = threadblock_swizzle.get_grid_shape(params_.grid_tiled_shape);
-    printf("Running on grid (%d %d %d)", grid.x, grid.y, grid.z);
+    printf("Running on grid (%d %d %d)\n", grid.x, grid.y, grid.z);
     dim3 block(ConvKernel::kThreadCount, 1, 1);
 
     cudaError_t result;
