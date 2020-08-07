@@ -428,7 +428,7 @@ public:
     // GemmCoord problem_size(args.matrix_size[0], args.matrix_size[1] * args.channels, dummy_k);
     GemmCoord max_problem_size(0, 0, 1);
     for (auto &arg : args) {
-      GemmCoord sample_size(arg.matrix_size[0], arg.matrix_size[1] * arg.channels, dummy_k);
+      GemmCoord sample_size(arg.matrix_size[0], arg.matrix_size[1] * arg.channels, 1);
       GemmCoord tmp(std::max(max_problem_size.m(), sample_size.m()),
           std::max(max_problem_size.n(), sample_size.n()),
           std::max(max_problem_size.k(), sample_size.k()));
@@ -438,6 +438,9 @@ public:
       max_problem_size,
       {ThreadblockShape::kM, ThreadblockShape::kN, ThreadblockShape::kK},
       split_k_slices);
+
+    assert(grid_shape.k() == 1);
+    grid_shape[2] = args.size();
 
     printf(">> initialize:\nProblem Size: (%d, %d, %d), block (%d, %d, %d), k_slices: %d -> grid_shape (%d, %d, %d)\n",
        max_problem_size.m(), max_problem_size.n(), max_problem_size.k(),
@@ -469,10 +472,16 @@ public:
 
     // Initialize the Params structure
     for (auto &arg : args) {
+      GemmCoord sample_size = GetProblemSize(arg.matrix_size, arg.channels, kInnerConv);
+      cutlass::gemm::GemmCoord sample_grid_shape = threadblock_swizzle.get_tiled_shape(
+        sample_size,
+        {ThreadblockShape::kM, ThreadblockShape::kN, ThreadblockShape::kK},
+        split_k_slices);
+
       host_params_.push_back(typename ConvKernel::SampleParams{
         arg.channels,
-        GetProblemSize(arg.matrix_size, arg.channels, kInnerConv),
-        grid_shape,
+        sample_size,
+        sample_grid_shape,
         arg.ref_In.non_const_ref(),
         {arg.ref_Window, {arg.window_size}}, // build window ref on the fly
         arg.ref_C.non_const_ref(),
@@ -481,7 +490,7 @@ public:
         static_cast<int *>(workspace)
       });
     }
-
+    params_.grid_tiled_shape = grid_shape;
 
     return Status::kSuccess;
   }
@@ -513,7 +522,8 @@ public:
     ThreadblockSwizzle threadblock_swizzle;
 
     // TODO(klecki): it's all the same, but maybe it's worth to keep it as value in the params_
-    dim3 grid = threadblock_swizzle.get_grid_shape(host_params_[0].grid_tiled_shape);
+    dim3 grid = threadblock_swizzle.get_grid_shape(params_.grid_tiled_shape);
+    printf("Running on grid (%d %d %d)", grid.x, grid.y, grid.z);
     dim3 block(ConvKernel::kThreadCount, 1, 1);
 
     cudaError_t result;

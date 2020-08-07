@@ -87,7 +87,7 @@ struct Conv {
     int channels;
     int window_size;
     cutlass::gemm::GemmCoord problem_size;
-    cutlass::gemm::GemmCoord grid_tiled_shape;
+    cutlass::gemm::GemmCoord sample_grid_tiled_shape;
     typename Mma::IteratorIn::Params params_In;
     typename Mma::IteratorIn::TensorRef ref_In;
     WindowRef ref_conv_Window;
@@ -112,7 +112,7 @@ struct Conv {
     SampleParams(
       int channels,
       cutlass::gemm::GemmCoord const & problem_size,
-      cutlass::gemm::GemmCoord const & grid_tiled_shape,
+      cutlass::gemm::GemmCoord const & sample_grid_tiled_shape,
       typename Mma::IteratorIn::TensorRef ref_In,
       WindowRef ref_conv_Window,
       typename Epilogue::OutputTileIterator::TensorRef ref_C,
@@ -123,7 +123,7 @@ struct Conv {
       channels(channels),
       window_size(ref_conv_Window.stride(0)),
       problem_size(problem_size), // actual problem size
-      grid_tiled_shape(grid_tiled_shape), // the grid used for the run (m, n, k), we assume k = 1
+      sample_grid_tiled_shape(sample_grid_tiled_shape), // the grid used for the run (m, n, k), we assume k = 1
       params_In(ref_In.layout()),
       ref_In(ref_In),
       params_Window(layout::RowMajor(kInnerConv ? problem_size.n() : problem_size.m()), window_size, channels),
@@ -133,7 +133,7 @@ struct Conv {
       params_D(ref_D.layout()),
       ref_D(ref_D),
       output_op(output_op) {
-      gemm_k_size = calc_gemm_k_size(problem_size, grid_tiled_shape);
+      gemm_k_size = calc_gemm_k_size(problem_size, sample_grid_tiled_shape);
       // if (threadIdx.x == 0){
         printf("gemm_k_size: %d \n", gemm_k_size);
       // }
@@ -146,7 +146,9 @@ struct Conv {
       // total tiles that cover the k-dim
       int total_gemm_k_iterations = (problem_size.k() + Mma::Shape::kK - 1) / Mma::Shape::kK;
       // how many iterations per block in the grid (grid_tiled_shape.k() is assumed to be 1)
-      int gemm_k_iterations = (total_gemm_k_iterations + grid_tiled_shape.k() - 1) / grid_tiled_shape.k();
+      // TODO(klecki): Normally we could split the k across grids, but we're using it to iterate over samples
+      // int gemm_k_iterations = (total_gemm_k_iterations + grid_tiled_shape.k() - 1) / grid_tiled_shape.k();
+      int gemm_k_iterations = total_gemm_k_iterations;
       printf("total_gemm_k_iterations %d gemm_k_iterations %d\n", total_gemm_k_iterations, gemm_k_iterations);
       return gemm_k_iterations * Mma::Shape::kK;
     }
@@ -155,8 +157,12 @@ struct Conv {
 
   using HostParams = std::vector<SampleParams>;
   struct Params {
-    int sample_count;
-    SampleParams *params;
+    int sample_count = 0;
+    SampleParams *params = nullptr;
+    cutlass::gemm::GemmCoord grid_tiled_shape;
+
+    CUTLASS_HOST_DEVICE
+    Params() {}
   };
 
 
@@ -285,13 +291,14 @@ struct Conv {
     cutlass::gemm::GemmCoord threadblock_tile_offset = threadblock_swizzle.get_tile_offset();
     // todo(klecki): here we know the actual tile!!! (global tile)
     PRINT_IF
-      printf("kernel::Conv::operator() threadIdx: (%d, %d, %d), threadblock_tile_offset mnk:(%d, %d, %d), params.grid_tiled_shape: (%d, %d, %d) \n",
+      printf("kernel::Conv::operator() threadIdx: (%d, %d, %d), threadblock_tile_offset mnk:(%d, %d, %d), params.sample_grid_tiled_shape: (%d, %d, %d), params_vec.grid_tiled_shape: (%d, %d, %d) \n",
       threadIdx.x, threadIdx.y, threadIdx.z, threadblock_tile_offset.m(), threadblock_tile_offset.n(), threadblock_tile_offset.k(),
-      params.grid_tiled_shape.m(), params.grid_tiled_shape.n(), params.grid_tiled_shape.k());
+      params.sample_grid_tiled_shape.m(), params.sample_grid_tiled_shape.n(), params.sample_grid_tiled_shape.k(),
+      params_vec.grid_tiled_shape.m(), params_vec.grid_tiled_shape.n(), params_vec.grid_tiled_shape.k());
 
     // Early exit if CTA is out of range
-    if (params.grid_tiled_shape.m() <= threadblock_tile_offset.m() ||
-      params.grid_tiled_shape.n() <= threadblock_tile_offset.n()) {
+    if (params.sample_grid_tiled_shape.m() <= threadblock_tile_offset.m() ||
+      params.sample_grid_tiled_shape.n() <= threadblock_tile_offset.n()) {
 
       return;
     }
@@ -431,20 +438,21 @@ struct Conv {
       threadblock_tile_offset.n() * Mma::Shape::kN
     );
 
-    int block_idx = threadblock_tile_offset.m() + threadblock_tile_offset.n() * params.grid_tiled_shape.m();
+    int block_idx = threadblock_tile_offset.m() + threadblock_tile_offset.n() * params.sample_grid_tiled_shape.m();
 
     // Construct the semaphore.
     Semaphore semaphore(params.semaphore + block_idx, thread_idx);
 
     // If performing a reduction via split-K, fetch the initial synchronization
-    if (kSplitKSerial && params.grid_tiled_shape.k() > 1) {
+    // TODO(klecki): assume k == 1
+    // if (kSplitKSerial && params.grid_tiled_shape.k() > 1) {
 
-      // Fetch the synchronization lock initially but do not block.
-      semaphore.fetch();
+    //   // Fetch the synchronization lock initially but do not block.
+    //   semaphore.fetch();
 
-      // Indicate which position in a serial reduction the output operator is currently updating
-      output_op.set_k_partition(threadblock_tile_offset.k());
-    }
+    //   // Indicate which position in a serial reduction the output operator is currently updating
+    //   output_op.set_k_partition(threadblock_tile_offset.k());
+    // }
 
     // Tile iterator loading from source tensor.
     typename Epilogue::OutputTileIterator iterator_C(
@@ -471,17 +479,18 @@ struct Conv {
       lane_idx);
 
     // Wait on the semaphore - this latency may have been covered by iterator construction
-    if (kSplitKSerial && params.grid_tiled_shape.k() > 1) {
+    // TODO(klecki): assume k == 1
+    // if (kSplitKSerial && params.grid_tiled_shape.k() > 1) {
 
-      // For subsequent threadblocks, the source matrix is held in the 'D' tensor.
-      if (threadblock_tile_offset.k()) {
-        iterator_C = iterator_D;
-      }
+    //   // For subsequent threadblocks, the source matrix is held in the 'D' tensor.
+    //   if (threadblock_tile_offset.k()) {
+    //     iterator_C = iterator_D;
+    //   }
 
-      semaphore.wait(threadblock_tile_offset.k());
+    //   semaphore.wait(threadblock_tile_offset.k());
 
-      __threadfence();
-    }
+    //   __threadfence();
+    // }
 
     // Execute the epilogue operator to update the destination tensor.
     epilogue(output_op, iterator_D, accumulators, iterator_C);
@@ -490,22 +499,23 @@ struct Conv {
     // Release the semaphore
     //
 
-    if (kSplitKSerial && params.grid_tiled_shape.k() > 1) {
+    // TODO(klecki): assume k == 1
+    // if (kSplitKSerial && params.grid_tiled_shape.k() > 1) {
 
-      int lock = 0;
-      if (params.grid_tiled_shape.k() == threadblock_tile_offset.k() + 1) {
+    //   int lock = 0;
+    //   if (params.grid_tiled_shape.k() == threadblock_tile_offset.k() + 1) {
 
-        // The final threadblock resets the semaphore for subsequent grids.
-        lock = 0;
-      }
-      else {
-        // Otherwise, the semaphore is incremented
-        lock = threadblock_tile_offset.k() + 1;
-      }
+    //     // The final threadblock resets the semaphore for subsequent grids.
+    //     lock = 0;
+    //   }
+    //   else {
+    //     // Otherwise, the semaphore is incremented
+    //     lock = threadblock_tile_offset.k() + 1;
+    //   }
 
-      __threadfence();
-      semaphore.release(lock);
-    }
+    //   __threadfence();
+    //   semaphore.release(lock);
+    // }
   }
 };
 
